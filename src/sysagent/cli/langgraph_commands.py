@@ -153,8 +153,7 @@ def langgraph(ctx, approval_level, auto_approve, confirm_all, debug):
     if debug:
         config.debug = True
     
-    permission_manager = PermissionManager()
-    permission_manager.load_permissions()
+    permission_manager = PermissionManager(config_manager)
     
     # Store in context
     ctx.obj = {
@@ -178,11 +177,12 @@ def run(ctx, command, use_async):
         return
     
     config = ctx.obj['config']
+    config_manager = ctx.obj.get('config_manager', ConfigManager())
     permission_manager = ctx.obj['permission_manager']
     
     try:
         # Initialize LangGraph agent
-        agent = LangGraphAgent(config, permission_manager)
+        agent = LangGraphAgent(config_manager, permission_manager)
         
         console.print(f"[blue]Processing command with LangGraph agent...[/blue]")
         

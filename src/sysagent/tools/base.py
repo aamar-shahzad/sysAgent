@@ -6,7 +6,7 @@ import json
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional, Union, Type
 from pathlib import Path
 
 from ..types import ToolCategory, PermissionLevel
@@ -39,6 +39,26 @@ class BaseTool(ABC):
     def __init__(self, config: Dict[str, Any] = None):
         self.config = config or {}
         self.metadata = self._get_metadata()
+
+    @property
+    def name(self) -> str:
+        """Get the tool name."""
+        return self.metadata.name
+
+    @property
+    def description(self) -> str:
+        """Get the tool description."""
+        return self.metadata.description
+
+    @property
+    def category(self) -> ToolCategory:
+        """Get the tool category."""
+        return self.metadata.category
+
+    @property
+    def permissions(self) -> List[str]:
+        """Get the tool's required permissions."""
+        return self.metadata.permissions
 
     @abstractmethod
     def _get_metadata(self) -> ToolMetadata:
@@ -80,6 +100,26 @@ class BaseTool(ABC):
                 execution_time=time.time() - start_time
             )
 
+    def get_help(self) -> str:
+        """Get help text for the tool."""
+        help_text = f"""
+Tool: {self.name}
+Description: {self.description}
+Category: {self.category.value}
+Version: {self.metadata.version}
+Permissions: {', '.join(self.permissions) if self.permissions else 'None'}
+
+"""
+        # Add usage examples if available
+        if hasattr(self, 'get_usage_examples'):
+            examples = self.get_usage_examples()
+            if examples:
+                help_text += "Usage Examples:\n"
+                for example in examples:
+                    help_text += f"  - {example}\n"
+        
+        return help_text
+
 
 class ToolFactory:
     """Factory for creating tool instances."""
@@ -105,6 +145,14 @@ class ToolFactory:
         """Get metadata for a tool."""
         tool = self.get_tool(name)
         return tool.metadata if tool else None
+
+    @staticmethod
+    def create_tool(tool_name: str) -> Optional[BaseTool]:
+        """Create a tool instance by name."""
+        tool_class = get_tool_class(tool_name)
+        if tool_class:
+            return tool_class()
+        return None
 
 
 class ToolExecutor:
@@ -140,15 +188,94 @@ class ToolExecutor:
 
 
 # Global tool registry
-_tool_registry = {}
+_tool_registry: Dict[str, Type[BaseTool]] = {}
+
+# Tool name to class mapping
+_tool_name_to_class: Dict[str, Type[BaseTool]] = {}
 
 
-def register_tool(tool_class: type):
+def register_tool(tool_class: Type[BaseTool]) -> Type[BaseTool]:
     """Decorator to register a tool."""
     _tool_registry[tool_class.__name__] = tool_class
+    
+    # Create a temporary instance to get the tool name
+    try:
+        temp_instance = tool_class()
+        _tool_name_to_class[temp_instance.metadata.name] = tool_class
+    except Exception:
+        pass
+    
     return tool_class
 
 
-def get_registered_tools() -> Dict[str, type]:
+def get_registered_tools() -> Dict[str, Type[BaseTool]]:
     """Get all registered tools."""
-    return _tool_registry.copy() 
+    return _tool_registry.copy()
+
+
+def get_tool_class(tool_name: str) -> Optional[Type[BaseTool]]:
+    """Get a tool class by tool name."""
+    # First try direct lookup
+    if tool_name in _tool_name_to_class:
+        return _tool_name_to_class[tool_name]
+    
+    # Try to find by class name patterns
+    class_name_patterns = [
+        tool_name,
+        tool_name.title().replace('_', ''),
+        ''.join(word.title() for word in tool_name.split('_')),
+    ]
+    
+    for pattern in class_name_patterns:
+        if pattern in _tool_registry:
+            return _tool_registry[pattern]
+    
+    # Try to match by iterating through registry
+    for class_name, tool_class in _tool_registry.items():
+        try:
+            instance = tool_class()
+            if instance.metadata.name == tool_name:
+                _tool_name_to_class[tool_name] = tool_class
+                return tool_class
+        except Exception:
+            continue
+    
+    return None
+
+
+def list_available_tools() -> List[Dict[str, Any]]:
+    """List all available tools with their metadata."""
+    tools = []
+    
+    for class_name, tool_class in _tool_registry.items():
+        try:
+            instance = tool_class()
+            tools.append({
+                'name': instance.metadata.name,
+                'description': instance.metadata.description,
+                'category': instance.metadata.category.value,
+                'permissions': instance.metadata.permissions,
+                'version': instance.metadata.version,
+            })
+        except Exception:
+            continue
+    
+    return tools
+
+
+def get_tool_permissions(tool_name: str) -> Dict[str, PermissionLevel]:
+    """Get required permissions for a tool."""
+    tool_class = get_tool_class(tool_name)
+    if not tool_class:
+        return {}
+    
+    try:
+        instance = tool_class()
+        # Map permission names to permission levels
+        permission_map = {}
+        for perm in instance.metadata.permissions:
+            # Default to READ level for most permissions
+            permission_map[perm] = PermissionLevel.READ
+        return permission_map
+    except Exception:
+        return {} 

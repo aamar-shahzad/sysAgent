@@ -43,6 +43,7 @@ class PermissionManager:
         return {
             "system_admin": False,
             "file_access": True,
+            "system_info": True,  # Added for system_info_tool
             "process_management": False,
             "network_access": True,
             "system_control": False,
@@ -59,18 +60,20 @@ class PermissionManager:
 
     def grant_permission(self, permission: str, user_input: str = None) -> bool:
         """Grant a permission with optional user confirmation."""
+        # If user_input is provided and is positive, grant it
         if user_input and user_input.lower() in ['y', 'yes', 'grant', 'allow']:
             self.permissions[permission] = True
             self._save_permissions()
             return True
         
-        # Auto-grant for safe operations
-        safe_permissions = ['file_access', 'monitoring_operations']
-        if permission in safe_permissions:
+        # If no user_input provided, auto-grant the permission
+        # This allows programmatic permission granting
+        if user_input is None:
             self.permissions[permission] = True
             self._save_permissions()
             return True
         
+        # If user_input was provided but was negative, don't grant
         return False
 
     def revoke_permission(self, permission: str) -> bool:
@@ -111,6 +114,10 @@ class PermissionManager:
         """Get current permission status."""
         return self.permissions.copy()
 
+    def get_granted_permissions(self) -> List[str]:
+        """Get list of granted permissions."""
+        return [perm for perm, granted in self.permissions.items() if granted]
+
     def list_permissions(self) -> List[str]:
         """List all available permissions."""
         return list(self.permissions.keys())
@@ -128,27 +135,44 @@ class PermissionManager:
             return True
         return False
 
-    def get_required_permissions(self, tool_name: str) -> List[str]:
-        """Get required permissions for a tool."""
+    def get_required_permissions(self, tool_name: str) -> List["PermissionRequest"]:
+        """Get required permissions for a tool as PermissionRequest objects."""
+        from ..types import PermissionRequest, PermissionLevel
+        
         permission_map = {
-            'file_tool': ['file_access'],
-            'system_info_tool': ['system_info'],
-            'process_tool': ['process_management'],
-            'network_tool': ['network_access'],
-            'system_control_tool': ['system_control'],
-            'security_tool': ['security_operations'],
-            'automation_tool': ['automation_operations'],
-            'monitoring_tool': ['monitoring_operations'],
-            'low_level_os_tool': ['low_level_os'],
-            'code_generation_tool': ['code_execution']
+            'file_tool': [('file_access', 'Access to file system operations')],
+            'system_info_tool': [('system_info', 'Access to system information')],
+            'process_tool': [('process_management', 'Access to process management')],
+            'network_tool': [('network_access', 'Access to network operations')],
+            'system_control_tool': [('system_control', 'Access to system control functions')],
+            'security_tool': [('security_operations', 'Access to security operations')],
+            'automation_tool': [('automation_operations', 'Access to automation features')],
+            'monitoring_tool': [('monitoring_operations', 'Access to monitoring features')],
+            'low_level_os_tool': [('low_level_os', 'Access to low-level OS functions')],
+            'os_intelligence_tool': [('low_level_os', 'Access to OS intelligence features')],
+            'code_generation_tool': [('code_execution', 'Access to code execution')]
         }
-        return permission_map.get(tool_name, [])
+        
+        permissions = permission_map.get(tool_name, [])
+        result = []
+        
+        for perm_name, description in permissions:
+            result.append(PermissionRequest(
+                permission=perm_name,
+                level=PermissionLevel.READ,
+                description=description,
+                required=True,
+                granted=self.has_permission(perm_name)
+            ))
+        
+        return result
 
     def check_tool_permissions(self, tool_name: str) -> bool:
         """Check if user has permissions for a specific tool."""
         required_permissions = self.get_required_permissions(tool_name)
         
-        for permission in required_permissions:
+        for perm_request in required_permissions:
+            permission = perm_request.permission if hasattr(perm_request, 'permission') else perm_request
             if not self.has_permission(permission):
                 # Try to auto-grant for common tools
                 if permission in ['file_access', 'monitoring_operations', 'system_info']:
@@ -156,4 +180,24 @@ class PermissionManager:
                 else:
                     return self.request_permission(permission, f"using {tool_name}")
         
-        return True 
+        return True
+
+    def check_system_permissions(self) -> Dict[str, bool]:
+        """Check system-level permissions and capabilities."""
+        from ..utils.platform import is_admin, can_elevate_privileges, detect_platform
+        
+        return {
+            "is_admin": is_admin(),
+            "can_elevate": can_elevate_privileges(),
+            "platform": detect_platform().value,
+            "file_access": self.has_permission("file_access"),
+            "system_info": self.has_permission("system_info"),
+            "network_access": self.has_permission("network_access"),
+            "process_management": self.has_permission("process_management"),
+        }
+
+    def clear_permissions(self) -> None:
+        """Clear all permissions (revoke all)."""
+        for permission in self.permissions:
+            self.permissions[permission] = False
+        self._save_permissions() 
