@@ -172,6 +172,7 @@
 - Confirmation prompts for sensitive actions
 - "Remember my choice" option for recurring approvals
 - Session-level and persistent approval storage
+- Edit actions before approval (modify parameters)
 
 **Approval Types:**
 - `PERMISSION` - Request tool permissions
@@ -179,12 +180,48 @@
 - `SENSITIVE_ACTION` - Sensitive operations (delete, modify system)
 - `EXECUTION` - Code/command execution approval
 - `FILE_WRITE` - File write confirmations
+- `BREAKPOINT` - Execution pause points
+- `REVIEW` - Review output before continuing
+- `EDIT` - Edit agent's planned action
 
 **Interactive Dialogs:**
 - Modern approval dialogs in GUI
 - Clear action descriptions
-- Approve/Deny buttons with visual feedback
+- Approve/Deny/Modify buttons with visual feedback
 - Remember choice checkbox
+- Editable fields for parameter modification
+
+**Advanced Breakpoints System:**
+- Pause execution at specific points
+- Types: `before_tool`, `after_tool`, `on_error`, `on_sensitive`, `periodic`, `conditional`
+- Enable/disable breakpoints dynamically
+- Hit count tracking
+- Conditional breakpoints with expression evaluation
+
+**Time-Travel / State Management:**
+- Save state snapshots during execution
+- Rollback to previous states
+- Step-by-step state history
+- Undo/redo capability for agent actions
+- State inspection for debugging
+
+**Feedback Collection:**
+- Rate agent responses (1-5 stars)
+- Add comments to feedback
+- Tag feedback by tool/action
+- Export feedback for analysis
+- Track average rating over time
+
+**Multi-Step Approval Workflows:**
+- Define custom approval sequences
+- Chain multiple approval types
+- Reusable workflow definitions
+- All-or-nothing workflow execution
+
+**Dynamic Routing:**
+- Redirect agent mid-execution
+- Override current plan with new instruction
+- Human-guided agent steering
 
 ### 🧠 Short-term Memory (NEW!)
 
@@ -680,6 +717,100 @@ sysagent "delete all files in trash"
 # - Approve/Deny buttons
 # - "Remember my choice" checkbox
 ```
+
+### Advanced Human-in-the-Loop Features
+
+```python
+from sysagent.core import LangGraphAgent, ConfigManager, PermissionManager
+
+# Initialize agent
+config = ConfigManager()
+perms = PermissionManager()
+agent = LangGraphAgent(config, perms)
+
+# Add breakpoints for debugging
+agent.add_breakpoint("before_tool", tool_name="file_operations")
+agent.add_breakpoint("on_error")  # Pause when errors occur
+agent.add_breakpoint("periodic")  # Pause every 5 steps
+
+# View breakpoints
+breakpoints = agent.get_breakpoints()
+print(f"Active breakpoints: {breakpoints}")
+
+# Pause/resume execution
+agent.pause_execution()
+print(f"Paused: {agent.is_paused()}")
+agent.resume_execution()
+
+# Time-travel: Save state snapshots
+snapshot_id = agent.save_state_snapshot({"note": "Before risky operation"})
+
+# View state history
+history = agent.get_state_history()
+for state in history:
+    print(f"Step {state['step']}: {state['message_count']} messages, tools: {state['tools_used']}")
+
+# Rollback to previous state
+agent.rollback_to_state(snapshot_id)
+# Or rollback by number of steps
+agent.rollback_steps(3)
+
+# Submit feedback on responses
+agent.submit_feedback(
+    rating=5,
+    comment="Very helpful response!",
+    tool_name="system_info",
+    tags=["accurate", "fast"]
+)
+
+# Get feedback summary
+summary = agent.get_feedback_summary()
+print(f"Average rating: {summary['average_rating']}/5")
+
+# Export feedback for analysis
+agent.export_feedback("/path/to/feedback.json")
+
+# Define custom approval workflow
+agent.define_approval_workflow("sensitive_delete", [
+    "permission",      # First get permission
+    "confirmation",    # Then confirm
+    "review"           # Finally review before execute
+])
+
+# Run the workflow
+approved = agent.run_approval_workflow(
+    "sensitive_delete",
+    "Delete Important Files",
+    "This will permanently delete files"
+)
+
+# Redirect agent with new instruction
+agent.redirect_with_instruction("Actually, just list the files instead of deleting")
+
+# Review action before execution
+approved, params = agent.review_before_action(
+    "delete_files",
+    {"path": "/tmp/old", "recursive": True},
+    editable_fields=["path", "recursive"]
+)
+# User can modify params before approving
+
+# Get middleware statistics
+stats = agent.get_middleware_stats()
+print(f"Approvals: {stats['approved']}, Denied: {stats['denied']}")
+```
+
+### Breakpoint Types
+
+| Type | Description |
+|------|-------------|
+| `before_tool` | Pause before tool execution |
+| `after_tool` | Pause after tool execution |
+| `on_error` | Pause when an error occurs |
+| `on_sensitive` | Pause for sensitive operations |
+| `periodic` | Pause every N steps |
+| `conditional` | Pause when condition is met |
+| `manual` | User-triggered pause |
 
 ### Plugin Management
 

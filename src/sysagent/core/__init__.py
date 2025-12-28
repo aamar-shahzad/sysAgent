@@ -26,6 +26,7 @@ from .deep_agent import DeepAgent, TaskPlan, ReasoningStep, create_deep_agent
 from .memory import MemoryManager, ShortTermMemory, LongTermMemory, get_memory_manager, reset_memory_manager
 from .middleware import (
     HumanInTheLoopMiddleware, ApprovalRequest, ApprovalStatus, ApprovalType,
+    BreakpointType, Breakpoint, StateSnapshot, FeedbackEntry,
     get_middleware, reset_middleware
 )
 
@@ -85,6 +86,10 @@ __all__ = [
     "ApprovalRequest",
     "ApprovalStatus",
     "ApprovalType",
+    "BreakpointType",
+    "Breakpoint",
+    "StateSnapshot",
+    "FeedbackEntry",
     "get_middleware",
     "reset_middleware",
 ] 
