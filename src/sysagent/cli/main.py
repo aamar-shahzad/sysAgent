@@ -155,21 +155,32 @@ def start_interactive_mode(config_manager, permission_manager, debug=False, auto
                 if isinstance(interrupt_data, (list, tuple)) and len(interrupt_data) > 0:
                     interrupt = interrupt_data[0]
                     if hasattr(interrupt, 'value') and isinstance(interrupt.value, dict):
+                        int_value = interrupt.value
+                        int_type = int_value.get('type', 'permission_request')
+                        
                         # Display the permission request
                         console.print(f"\n[yellow]🔒 Permission Request[/yellow]")
-                        console.print(f"[bold]{interrupt.value.get('message', 'Permission required')}[/bold]")
-                        console.print(f"Tool: {interrupt.value.get('tool', 'Unknown')}")
-                        console.print(f"Action: {interrupt.value.get('action', 'Unknown')}")
-                        if interrupt.value.get('path'):
-                            console.print(f"Path: {interrupt.value.get('path')}")
+                        console.print(f"[bold]{int_value.get('message', 'Permission required')}[/bold]")
+                        console.print(f"Tool: {int_value.get('tool', 'Unknown')}")
+                        console.print(f"Action: {int_value.get('action', 'Unknown')}")
+                        if int_value.get('path'):
+                            console.print(f"Path: {int_value.get('path')}")
+                        if int_value.get('target'):
+                            console.print(f"Target: {int_value.get('target')}")
+                        if int_value.get('description'):
+                            console.print(f"Description: {int_value.get('description')}")
                         
                         # Get user response
-                        prompt = interrupt.value.get('prompt', 'Grant permission? (y/n): ')
-                        user_response = session.prompt(f"\n{prompt} ")
+                        user_response = session.prompt("\nAllow this action? (y/n): ")
+                        approved = user_response.lower() in ['y', 'yes', 'grant', 'allow']
                         
-                        # Resume the agent with the user's response
+                        # Resume the agent with approval dict
                         from langgraph.types import Command
-                        resume_result = agent.process_command(Command(resume=user_response))
+                        resume_value = {"approved": approved}
+                        if not approved:
+                            resume_value["reason"] = "User declined"
+                        
+                        resume_result = agent.process_command(Command(resume=resume_value))
                         
                         if resume_result['success']:
                             console.print(f"\n[green]✓[/green] {resume_result['message']}")

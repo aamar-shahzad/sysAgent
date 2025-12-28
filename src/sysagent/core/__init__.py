@@ -31,6 +31,11 @@ from .middleware import (
 )
 from .context_awareness import ContextAwareness, ContextInfo, Suggestion, get_context_awareness
 from .task_templates import TaskTemplateManager, TaskTemplate, TaskStep, get_template_manager
+from .human_loop import (
+    HumanApprovalSystem, ToolApprovalRequest, ApprovalType as HumanApprovalType,
+    ApprovalStatus as HumanApprovalStatus, get_approval_system, reset_approval_system,
+    MultiStepApprovalWorkflow, WorkflowStep
+)
 
 __all__ = [
     "SysAgent",
@@ -104,4 +109,13 @@ __all__ = [
     "TaskTemplate",
     "TaskStep",
     "get_template_manager",
+    # Advanced Human-in-the-Loop
+    "HumanApprovalSystem",
+    "ToolApprovalRequest",
+    "HumanApprovalType",
+    "HumanApprovalStatus",
+    "get_approval_system",
+    "reset_approval_system",
+    "MultiStepApprovalWorkflow",
+    "WorkflowStep",
 ] 

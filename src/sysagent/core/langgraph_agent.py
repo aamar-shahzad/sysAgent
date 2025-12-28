@@ -211,316 +211,231 @@ class LangGraphAgent:
             print(f"Warning: Could not save API key: {e}")
 
     def _create_langgraph_tools(self):
-        """Create LangGraph-compatible tools with permission checking."""
+        """Create LangGraph-compatible tools with automatic permission handling."""
         tools = []
+        
+        def _check_and_grant_permission(permission: str, tool_name: str, action: str) -> bool:
+            """Check permission and auto-grant for safe operations, interrupt for risky ones."""
+            if self.permission_manager.has_permission(permission):
+                return True
+            
+            # Define high-risk actions that need explicit approval
+            high_risk = {
+                "file_access": ["delete", "write", "move"],
+                "system_control": ["shutdown", "restart", "sleep"],
+                "process_management": ["kill", "terminate"],
+            }
+            
+            risk_actions = high_risk.get(permission, [])
+            
+            # Auto-grant for low-risk read operations
+            if action not in risk_actions:
+                self.permission_manager.grant_permission(permission)
+                return True
+            
+            # For high-risk, use interrupt for UI approval
+            approval = interrupt({
+                "type": "permission_request",
+                "permission": permission,
+                "tool": tool_name,
+                "action": action,
+                "message": f"Allow {tool_name} to {action}?"
+            })
+            
+            if approval and approval.get("approved"):
+                self.permission_manager.grant_permission(permission)
+                return True
+            return False
 
         # File operations tool
         @tool
         def file_operations(action: str, path: str = None, content: str = None) -> str:
-            """Perform file system operations (list, read, write, delete files and directories)."""
+            """Perform file operations: list, read, write, delete, copy, move files."""
             try:
-                if self.debug:
-                    print(f"DEBUG: file_operations tool called with action={action}, path={path}")
-                
-                # Check permissions
-                if not self.permission_manager.has_permission("file_access"):
-                    # Return a special message that will be handled by the CLI
-                    return "PERMISSION_REQUEST:file_access:file_operations:Permission required for file system access:Grant permission for file operations? (y/n): "
+                # Auto-grant for read operations, interrupt for write/delete
+                if action in ["delete", "write"] and not self.permission_manager.has_permission("file_access"):
+                    approval = interrupt({
+                        "type": "permission_request",
+                        "tool": "file_operations",
+                        "action": action,
+                        "path": path,
+                        "message": f"Allow file {action} on {path}?"
+                    })
+                    if not (approval and approval.get("approved")):
+                        return f"File {action} was not approved by user."
+                    self.permission_manager.grant_permission("file_access")
                 
                 result = self.tool_executor.execute_tool("file_tool", action=action, path=path, content=content)
-                
-                if self.debug:
-                    print(f"DEBUG: file_operations result = {result}")
-                
-                if result.success:
-                    return str(result.data)
-                else:
-                    return f"Error: {result.error}"
+                return str(result.data) if result.success else f"Error: {result.error}"
             except Exception as e:
-                if self.debug:
-                    print(f"DEBUG: file_operations exception = {e}")
-                
-                # Check if this is an interrupt exception
-                from langgraph.types import Interrupt
-                if isinstance(e, tuple) and len(e) > 0 and isinstance(e[0], Interrupt):
-                    interrupt = e[0]
-                    # Return the interrupt data so it can be handled by the CLI
-                    import json
-                    return f"INTERRUPT:{json.dumps(interrupt.value)}"
-                elif isinstance(e, Interrupt):
-                    # Direct interrupt exception
-                    import json
-                    return f"INTERRUPT:{json.dumps(e.value)}"
-                
-                return f"Error performing file operations: {str(e)}"
+                return f"Error: {str(e)}"
 
-        # System info tool
+        # System info tool - always auto-approve (read-only)
         @tool
-        def system_info(action: str = "general") -> str:
-            """Get system information and metrics (CPU, memory, disk usage, OS info)."""
+        def system_info(action: str = "overview") -> str:
+            """Get system info: overview, cpu, memory, disk, battery, network, processes."""
             try:
-                if self.debug:
-                    print(f"DEBUG: system_info tool called with action={action}")
-                
-                # Check permissions
-                if not self.permission_manager.has_permission("system_info"):
-                    # Return a special message that will be handled by the CLI
-                    return "PERMISSION_REQUEST:system_info:system_info:Permission required for system information access:Grant permission for system information access? (y/n): "
-                
+                self.permission_manager.grant_permission("system_info")
                 result = self.tool_executor.execute_tool("system_info_tool", action=action)
-                
-                if self.debug:
-                    print(f"DEBUG: system_info result = {result}")
-                
-                if result.success:
-                    return str(result.data)
-                else:
-                    return f"Error: {result.error}"
+                return str(result.data) if result.success else f"Error: {result.error}"
             except Exception as e:
-                if self.debug:
-                    print(f"DEBUG: system_info exception = {e}")
-                
-                # Check if this is an interrupt exception
-                from langgraph.types import Interrupt
-                if isinstance(e, tuple) and len(e) > 0 and isinstance(e[0], Interrupt):
-                    interrupt = e[0]
-                    # Return the interrupt data so it can be handled by the CLI
-                    import json
-                    return f"INTERRUPT:{json.dumps(interrupt.value)}"
-                elif isinstance(e, Interrupt):
-                    # Direct interrupt exception
-                    import json
-                    return f"INTERRUPT:{json.dumps(e.value)}"
-                
-                return f"Error getting system info: {str(e)}"
+                return f"Error: {str(e)}"
 
         # Process management tool
         @tool
         def process_management(action: str, pid: int = None, name: str = None) -> str:
-            """Manage system processes (list, kill, monitor processes)."""
+            """Manage processes: list, kill, info, tree."""
             try:
-                # Check permissions
-                if not self.permission_manager.has_permission("process_management"):
-                    # Use interrupt to ask for permission
-                    permission_granted = interrupt(f"Permission required for process management. Grant permission? (y/n): ")
-                    if permission_granted.lower() in ['y', 'yes', 'grant', 'allow']:
-                        self.permission_manager.grant_permission("process_management")
-                    else:
-                        return "Permission denied for process management"
+                # Kill actions need approval
+                if action in ["kill", "terminate"] and not self.permission_manager.has_permission("process_management"):
+                    approval = interrupt({
+                        "type": "permission_request",
+                        "tool": "process_management",
+                        "action": action,
+                        "target": name or str(pid),
+                        "message": f"Allow killing process {name or pid}?"
+                    })
+                    if not (approval and approval.get("approved")):
+                        return f"Process {action} was not approved."
+                    self.permission_manager.grant_permission("process_management")
+                else:
+                    self.permission_manager.grant_permission("process_management")
                 
                 result = self.tool_executor.execute_tool("process_tool", action=action, pid=pid, name=name)
-                if result.success:
-                    return str(result.data)
-                else:
-                    return f"Error: {result.error}"
+                return str(result.data) if result.success else f"Error: {result.error}"
             except Exception as e:
-                return f"Error performing process management: {str(e)}"
+                return f"Error: {str(e)}"
 
-        # Network diagnostics tool
+        # Network diagnostics tool - auto-approve (read-only)
         @tool
         def network_diagnostics(action: str, host: str = None, port: int = None) -> str:
-            """Perform network diagnostics (ping, port scan, connectivity tests)."""
+            """Network diagnostics: ping, ports, connections, speed, info."""
             try:
-                # Check permissions
-                if not self.permission_manager.has_permission("network_access"):
-                    # Use interrupt to ask for permission
-                    permission_granted = interrupt(f"Permission required for network diagnostics. Grant permission? (y/n): ")
-                    if permission_granted.lower() in ['y', 'yes', 'grant', 'allow']:
-                        self.permission_manager.grant_permission("network_access")
-                    else:
-                        return "Permission denied for network diagnostics"
-                
+                self.permission_manager.grant_permission("network_access")
                 result = self.tool_executor.execute_tool("network_tool", action=action, host=host, port=port)
-                if result.success:
-                    return str(result.data)
-                else:
-                    return f"Error: {result.error}"
+                return str(result.data) if result.success else f"Error: {result.error}"
             except Exception as e:
-                return f"Error performing network diagnostics: {str(e)}"
+                return f"Error: {str(e)}"
 
-        # System control tool
+        # System control tool - always needs approval for dangerous actions
         @tool
         def system_control(action: str, service_name: str = None, command: str = None) -> str:
-            """Control system services, power management, user management, and system configuration."""
+            """System control: shutdown, restart, sleep, lock, volume, brightness."""
             try:
-                # Check permissions
-                if not self.permission_manager.has_permission("system_control"):
-                    # Use interrupt to ask for permission
-                    permission_granted = interrupt(f"Permission required for system control. Grant permission? (y/n): ")
-                    if permission_granted.lower() in ['y', 'yes', 'grant', 'allow']:
-                        self.permission_manager.grant_permission("system_control")
-                    else:
-                        return "Permission denied for system control"
+                dangerous_actions = ["shutdown", "restart", "sleep", "hibernate"]
+                if action in dangerous_actions:
+                    approval = interrupt({
+                        "type": "permission_request",
+                        "tool": "system_control",
+                        "action": action,
+                        "message": f"Allow system {action}? This is a significant action."
+                    })
+                    if not (approval and approval.get("approved")):
+                        return f"System {action} was not approved."
+                
+                self.permission_manager.grant_permission("system_control")
                 
                 result = self.tool_executor.execute_tool("system_control_tool", action=action, service_name=service_name, command=command)
-                if result.success:
-                    return str(result.data)
-                else:
-                    return f"Error: {result.error}"
+                return str(result.data) if result.success else f"Error: {result.error}"
             except Exception as e:
-                return f"Error performing system control: {str(e)}"
+                return f"Error: {str(e)}"
 
-        # Code generation tool
+        # Code generation tool - needs approval
         @tool
         def generate_code(description: str, language: str = "python") -> str:
-            """Generate and execute Python code for custom solutions when no specific tool exists."""
+            """Generate code for custom solutions."""
             try:
-                # Check permissions
-                if not self.permission_manager.has_permission("code_execution"):
-                    # Use interrupt to ask for permission
-                    permission_granted = interrupt(f"Permission required for code execution. Grant permission? (y/n): ")
-                    if permission_granted.lower() in ['y', 'yes', 'grant', 'allow']:
-                        self.permission_manager.grant_permission("code_execution")
-                    else:
-                        return "Permission denied for code execution"
+                approval = interrupt({
+                    "type": "permission_request",
+                    "tool": "generate_code",
+                    "action": "execute_code",
+                    "description": description[:100],
+                    "message": f"Allow code generation for: {description[:50]}?"
+                })
+                if not (approval and approval.get("approved")):
+                    return "Code generation was not approved."
                 
+                self.permission_manager.grant_permission("code_execution")
                 result = self.tool_executor.execute_tool("code_generation_tool", description=description, language=language)
-                if result.success:
-                    return str(result.data)
-                else:
-                    return f"Error: {result.error}"
+                return str(result.data) if result.success else f"Error: {result.error}"
             except Exception as e:
-                return f"Error generating code: {str(e)}"
+                return f"Error: {str(e)}"
 
-        # Security operations tool
+        # Security operations - auto-approve reads
         @tool
         def security_operations(action: str, target: str = None) -> str:
-            """Perform security audits, vulnerability scanning, and security monitoring."""
+            """Security audits and monitoring. Actions: scan, audit, check_ports, firewall_status."""
             try:
-                # Check permissions
-                if not self.permission_manager.has_permission("security_operations"):
-                    # Use interrupt to ask for permission
-                    permission_granted = interrupt(f"Permission required for security operations. Grant permission? (y/n): ")
-                    if permission_granted.lower() in ['y', 'yes', 'grant', 'allow']:
-                        self.permission_manager.grant_permission("security_operations")
-                    else:
-                        return "Permission denied for security operations"
-                
+                self.permission_manager.grant_permission("security_operations")
                 result = self.tool_executor.execute_tool("security_tool", action=action, target=target)
-                if result.success:
-                    return str(result.data)
-                else:
-                    return f"Error: {result.error}"
+                return str(result.data) if result.success else f"Error: {result.error}"
             except Exception as e:
-                return f"Error performing security operations: {str(e)}"
+                return f"Error: {str(e)}"
 
-        # Automation operations tool
+        # Automation operations - auto-approve
         @tool
         def automation_operations(action: str, name: str = None, command: str = None, schedule: str = None) -> str:
-            """Schedule tasks, create workflows, and automate system operations."""
+            """Automation and scheduling. Actions: run_workflow, create_task, list_tasks."""
             try:
-                # Check permissions
-                if not self.permission_manager.has_permission("automation_operations"):
-                    # Use interrupt to ask for permission
-                    permission_granted = interrupt(f"Permission required for automation operations. Grant permission? (y/n): ")
-                    if permission_granted.lower() in ['y', 'yes', 'grant', 'allow']:
-                        self.permission_manager.grant_permission("automation_operations")
-                    else:
-                        return "Permission denied for automation operations"
-                
+                self.permission_manager.grant_permission("automation_operations")
                 result = self.tool_executor.execute_tool("automation_tool", action=action, name=name, command=command, schedule=schedule)
-                if result.success:
-                    return str(result.data)
-                else:
-                    return f"Error: {result.error}"
+                return str(result.data) if result.success else f"Error: {result.error}"
             except Exception as e:
-                return f"Error performing automation operations: {str(e)}"
+                return f"Error: {str(e)}"
 
-        # Monitoring operations tool
+        # Monitoring operations - auto-approve (read-only)
         @tool
         def monitoring_operations(action: str, name: str = None, condition: str = None, threshold: float = None) -> str:
-            """Monitor system resources, performance metrics, and create alerts."""
+            """Monitor system resources and create alerts."""
             try:
-                # Check permissions
-                if not self.permission_manager.has_permission("monitoring_operations"):
-                    # Use interrupt to ask for permission
-                    permission_granted = interrupt(f"Permission required for monitoring operations. Grant permission? (y/n): ")
-                    if permission_granted.lower() in ['y', 'yes', 'grant', 'allow']:
-                        self.permission_manager.grant_permission("monitoring_operations")
-                    else:
-                        return "Permission denied for monitoring operations"
-                
+                self.permission_manager.grant_permission("monitoring_operations")
                 result = self.tool_executor.execute_tool("monitoring_tool", action=action, name=name, condition=condition, threshold=threshold)
-                if result.success:
-                    return str(result.data)
-                else:
-                    return f"Error: {result.error}"
+                return str(result.data) if result.success else f"Error: {result.error}"
             except Exception as e:
-                return f"Error performing monitoring operations: {str(e)}"
+                return f"Error: {str(e)}"
 
-        # OS Intelligence tool
+        # OS Intelligence - auto-approve (read-only analysis)
         @tool
         def os_intelligence(action: str, target: str = None, analysis_depth: str = "comprehensive",
                            optimization_level: str = "balanced") -> str:
-            """Advanced OS-level intelligence, predictive analysis, smart automation, and system optimization."""
+            """OS-level intelligence and analysis."""
             try:
-                # Check permissions
-                if not self.permission_manager.has_permission("low_level_os"):
-                    # Use interrupt to ask for permission
-                    permission_granted = interrupt(f"Permission required for OS intelligence. Grant permission? (y/n): ")
-                    if permission_granted.lower() in ['y', 'yes', 'grant', 'allow']:
-                        self.permission_manager.grant_permission("low_level_os")
-                    else:
-                        return "Permission denied for OS intelligence"
-                
+                self.permission_manager.grant_permission("low_level_os")
                 params = {"action": action}
-                if target:
-                    params["target"] = target
-                if analysis_depth:
-                    params["analysis_depth"] = analysis_depth
-                if optimization_level:
-                    params["optimization_level"] = optimization_level
+                if target: params["target"] = target
+                if analysis_depth: params["analysis_depth"] = analysis_depth
+                if optimization_level: params["optimization_level"] = optimization_level
                 
                 result = self.tool_executor.execute_tool("os_intelligence_tool", **params)
-                if result.success:
-                    return str(result.data)
-                else:
-                    return f"Error: {result.error}"
+                return str(result.data) if result.success else f"Error: {result.error}"
             except Exception as e:
-                return f"Error performing OS intelligence operations: {str(e)}"
+                return f"Error: {str(e)}"
 
-        # Low-level OS tool
+        # Low-level OS - auto-approve reads
         @tool
         def low_level_os(action: str, target: str = None, interface: str = None,
                          system_call: str = None, hardware_component: str = None) -> str:
-            """Direct low-level OS access, system calls, kernel interfaces, and real-time hardware data."""
+            """Low-level OS access and hardware info."""
             try:
-                # Check permissions
-                if not self.permission_manager.has_permission("low_level_os"):
-                    # Use interrupt to ask for permission
-                    permission_granted = interrupt(f"Permission required for low-level OS access. Grant permission? (y/n): ")
-                    if permission_granted.lower() in ['y', 'yes', 'grant', 'allow']:
-                        self.permission_manager.grant_permission("low_level_os")
-                    else:
-                        return "Permission denied for low-level OS access"
-                
+                self.permission_manager.grant_permission("low_level_os")
                 params = {"action": action}
-                if target:
-                    params["target"] = target
-                if interface:
-                    params["interface"] = interface
-                if system_call:
-                    params["system_call"] = system_call
-                if hardware_component:
-                    params["hardware_component"] = hardware_component
+                if target: params["target"] = target
+                if interface: params["interface"] = interface
+                if system_call: params["system_call"] = system_call
+                if hardware_component: params["hardware_component"] = hardware_component
                 
                 result = self.tool_executor.execute_tool("low_level_os_tool", **params)
-                if result.success:
-                    return str(result.data)
-                else:
-                    return f"Error: {result.error}"
+                return str(result.data) if result.success else f"Error: {result.error}"
             except Exception as e:
-                return f"Error performing low-level OS operations: {str(e)}"
+                return f"Error: {str(e)}"
 
-        # Document operations tool
+        # Document operations - auto-approve
         @tool
         def document_operations(action: str, path: str = None, content: str = None, 
                                title: str = None, template: str = None) -> str:
-            """Create and manage documents, notes, and text files. Actions: create, create_note, edit, read, open, list_notes, search_notes, create_from_template."""
+            """Create and manage documents. Actions: create, create_note, edit, read, open."""
             try:
-                if not self.permission_manager.has_permission("file_access"):
-                    return "PERMISSION_REQUEST:file_access:document_operations:Permission required for document access"
-                
+                self.permission_manager.grant_permission("file_access")
                 params = {"action": action}
                 if path: params["path"] = path
                 if content: params["content"] = content
@@ -530,17 +445,15 @@ class LangGraphAgent:
                 result = self.tool_executor.execute_tool("document_tool", **params)
                 return str(result.data) if result.success else f"Error: {result.error}"
             except Exception as e:
-                return f"Error with documents: {str(e)}"
+                return f"Error: {str(e)}"
 
-        # Spreadsheet operations tool
+        # Spreadsheet operations - auto-approve
         @tool
         def spreadsheet_operations(action: str, path: str = None, headers: list = None,
                                    data: list = None, template: str = None, title: str = None) -> str:
-            """Create and manage spreadsheets (Excel/CSV). Actions: create, create_excel, read, write_row, create_data_entry, create_template (budget/inventory/timesheet/contacts/expenses)."""
+            """Create and manage spreadsheets. Actions: create, create_excel, create_template."""
             try:
-                if not self.permission_manager.has_permission("file_access"):
-                    return "PERMISSION_REQUEST:file_access:spreadsheet_operations:Permission required for spreadsheet access"
-                
+                self.permission_manager.grant_permission("file_access")
                 params = {"action": action}
                 if path: params["path"] = path
                 if headers: params["headers"] = headers
@@ -551,20 +464,14 @@ class LangGraphAgent:
                 result = self.tool_executor.execute_tool("spreadsheet_tool", **params)
                 return str(result.data) if result.success else f"Error: {result.error}"
             except Exception as e:
-                return f"Error with spreadsheet: {str(e)}"
+                return f"Error: {str(e)}"
 
-        # Application control tool
+        # Application control - auto-approve
         @tool
         def app_control(action: str, app_name: str = None, path: str = None) -> str:
-            """Launch, close, and manage applications. Actions: launch, close, list, list_running, focus, info, find."""
+            """Launch and manage apps. Actions: launch, close, list, focus."""
             try:
-                if not self.permission_manager.has_permission("app_control"):
-                    permission_granted = interrupt("Permission required for app control. Grant? (y/n): ")
-                    if permission_granted.lower() in ['y', 'yes']:
-                        self.permission_manager.grant_permission("app_control")
-                    else:
-                        return "Permission denied"
-                
+                self.permission_manager.grant_permission("app_control")
                 params = {"action": action}
                 if app_name: params["app_name"] = app_name
                 if path: params["path"] = path
@@ -572,32 +479,26 @@ class LangGraphAgent:
                 result = self.tool_executor.execute_tool("app_tool", **params)
                 return str(result.data) if result.success else f"Error: {result.error}"
             except Exception as e:
-                return f"Error with app control: {str(e)}"
+                return f"Error: {str(e)}"
 
-        # Clipboard tool
+        # Clipboard - auto-approve
         @tool
         def clipboard_operations(action: str, text: str = None) -> str:
             """Clipboard operations. Actions: copy, paste, clear, history."""
             try:
-                if not self.permission_manager.has_permission("clipboard"):
-                    permission_granted = interrupt("Permission required for clipboard. Grant? (y/n): ")
-                    if permission_granted.lower() in ['y', 'yes']:
-                        self.permission_manager.grant_permission("clipboard")
-                    else:
-                        return "Permission denied"
-                
+                self.permission_manager.grant_permission("clipboard")
                 params = {"action": action}
                 if text: params["text"] = text
                 
                 result = self.tool_executor.execute_tool("clipboard_tool", **params)
                 return str(result.data) if result.success else f"Error: {result.error}"
             except Exception as e:
-                return f"Error with clipboard: {str(e)}"
+                return f"Error: {str(e)}"
 
-        # Browser control tool
+        # Browser control - auto-approve
         @tool
         def browser_control(action: str, url: str = None, browser: str = None, query: str = None) -> str:
-            """Control web browsers. Actions: open, search, close, list_browsers, get_bookmarks."""
+            """Control browsers. Actions: open, search, close."""
             try:
                 params = {"action": action}
                 if url: params["url"] = url
@@ -609,11 +510,11 @@ class LangGraphAgent:
             except Exception as e:
                 return f"Error: {str(e)}"
 
-        # Window management tool
+        # Window management - auto-approve
         @tool
         def window_control(action: str, app: str = None, x: int = None, y: int = None, 
                           width: int = None, height: int = None) -> str:
-            """Manage windows. Actions: list, focus, minimize, maximize, tile_left, tile_right, resize, move, close."""
+            """Manage windows. Actions: list, focus, minimize, maximize, tile_left, tile_right."""
             try:
                 params = {"action": action}
                 if app: params["app"] = app
@@ -627,10 +528,10 @@ class LangGraphAgent:
             except Exception as e:
                 return f"Error: {str(e)}"
 
-        # Media control tool
+        # Media control - auto-approve
         @tool
         def media_control(action: str, level: int = None) -> str:
-            """Control audio/media. Actions: volume, mute, unmute, play_pause, next, previous, get_volume."""
+            """Control audio. Actions: volume, mute, unmute, play_pause, next, previous."""
             try:
                 params = {"action": action}
                 if level is not None: params["level"] = level
@@ -1039,10 +940,21 @@ class LangGraphAgent:
         if self.memory_manager:
             memory_context = self.memory_manager.get_system_context()
         
-        system_prompt = f"""You are SysAgent, an AI that gives users COMPLETE control over their computer through natural language.
-You can do ANYTHING the user normally does with keyboard and mouse - from Excel to browsers to system settings.
+        system_prompt = f"""You are SysAgent, a powerful AI assistant that controls the computer through natural language.
 
-🎯 COMPLETE OS CONTROL - Your capabilities:
+## CORE BEHAVIOR
+- You EXECUTE commands immediately using tools - never ask permission in chat
+- The system handles permissions automatically via UI popups
+- Be CONCISE - report results, don't explain what you're going to do
+- If a tool fails, briefly explain and suggest alternatives
+
+## THINKING PROCESS (use internally)
+1. UNDERSTAND: What does the user want?
+2. PLAN: Which tool(s) achieve this?
+3. EXECUTE: Call the tool immediately
+4. REPORT: Brief confirmation of result
+
+## CAPABILITIES - Your Full Toolkit:
 
 ⌨️ INPUT CONTROL:
 • keyboard_mouse(action="type", text="X") - Type any text
@@ -1100,26 +1012,44 @@ You can do ANYTHING the user normally does with keyboard and mouse - from Excel 
 • smart_search(action="files"|"apps"|"content", query="X") - Find anything
 • context_memory(action="remember"|"recall", key="X") - Remember preferences
 
-EXAMPLES - Common user requests:
+## QUICK REFERENCE - User Says → Tool Call:
 • "Open Excel" → app_control(action="launch", app_name="Excel")
-• "Type hello world" → keyboard_mouse(action="type", text="hello world")
+• "Type hello" → keyboard_mouse(action="type", text="hello")
 • "Press Ctrl+C" → keyboard_mouse(action="hotkey", shortcut="ctrl+c")
 • "Click at 100, 200" → keyboard_mouse(action="click", x=100, y=200)
-• "Set volume to 50%" → media_control(action="volume", level=50)
-• "Take a screenshot" → take_screenshot(action="capture")
+• "Volume 50%" → media_control(action="volume", level=50)
+• "Screenshot" → take_screenshot(action="capture")
 • "Open google.com" → browser_control(action="open", url="https://google.com")
-• "Search for python tutorials" → browser_control(action="search", query="python tutorials")
-• "Create a budget spreadsheet" → spreadsheet_operations(action="create_template", template="budget")
-• "Show system status" → system_info(action="overview")
-• "What's using my CPU" → system_insights(action="resource_hogs")
-• "Tile windows left and right" → window_control(action="tile_left") then (action="tile_right")
+• "Search python" → browser_control(action="search", query="python")
+• "Budget spreadsheet" → spreadsheet_operations(action="create_template", template="budget")
+• "System status" → system_info(action="overview")
+• "What's using CPU" → system_insights(action="resource_hogs")
 
-RULES:
-1. ALWAYS call a tool - you CAN do anything the user asks
-2. For keyboard/mouse operations, use keyboard_mouse tool
-3. For app control, use app_control or browser_control
-4. Be fast and responsive - one action at a time
-5. Confirm sensitive operations (delete files, system changes)
+## CRITICAL RULES - MUST FOLLOW:
+1. EXECUTE IMMEDIATELY - call tools without asking
+2. NEVER SAY "I need permission" or "Would you like me to" - JUST DO IT
+3. Permissions are handled by UI popups automatically
+4. Be CONCISE - one line confirmations
+5. If tool fails, explain briefly and suggest alternative
+
+## EXAMPLES OF CORRECT BEHAVIOR:
+User: "Take a screenshot"
+You: *immediately call take_screenshot(action="capture")*
+Response: "Screenshot saved to Desktop/screenshot_123.png"
+
+User: "Open Chrome and go to YouTube"  
+You: *call app_control(action="launch", app_name="Chrome")*
+You: *call browser_control(action="open", url="https://youtube.com")*
+Response: "Chrome opened with YouTube"
+
+## WRONG (never do this):
+❌ "I'd be happy to take a screenshot for you. First, let me ask for permission..."
+❌ "To open Excel, I'll need to access the application control feature. Would you like me to proceed?"
+❌ "Sure! I can help with that. Let me explain what I'm going to do..."
+
+## RIGHT (always do this):
+✅ *calls tool immediately*
+✅ "Done. Screenshot saved." / "Excel is now open." / "Volume set to 50%"
 
 {memory_context}"""
 
