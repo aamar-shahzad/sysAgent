@@ -258,7 +258,10 @@ class MainWindow:
             self.chat_interface.add_message("Agent not initialized. Please configure your API key.", is_user=False)
 
     def _process_chat_message(self, message: str):
-        """Process chat message in background thread."""
+        """Process chat message in background thread with execution logging."""
+        import time
+        start_time = time.time()
+        
         try:
             # Try streaming first
             use_streaming = hasattr(self.agent, 'process_command_streaming')
@@ -268,13 +271,14 @@ class MainWindow:
                 stream_data = None
                 try:
                     self.root.after(0, lambda: setattr(self, '_stream_data', self.chat_interface.add_streaming_message()))
-                    import time
                     time.sleep(0.05)  # Brief wait for UI update
                     stream_data = getattr(self, '_stream_data', None)
                 except Exception:
                     pass
                 
                 full_response = ""
+                tools_used = []
+                
                 for chunk in self.agent.process_command_streaming(message):
                     chunk_type = chunk.get("type", "")
                     content = chunk.get("content", "")
@@ -290,9 +294,18 @@ class MainWindow:
                             self.root.after(0, lambda t=content: self.chat_interface.update_streaming_message(stream_data, t))
                     elif chunk_type == "tool_call":
                         name = chunk.get("name", "tool")
-                        self.root.after(0, lambda n=name: self._show_tool_status(n))
+                        tools_used.append(name)
+                        # Add execution log for tool call
+                        self.root.after(0, lambda n=name: self._add_tool_log(n, "running"))
+                    elif chunk_type == "tool_result":
+                        if tools_used:
+                            tool = tools_used[-1]
+                            duration = int((time.time() - start_time) * 1000)
+                            self.root.after(0, lambda t=tool, d=duration: self._add_tool_log(t, "success", d))
                     elif chunk_type == "error":
                         full_response = f"Error: {content}"
+                        if tools_used:
+                            self.root.after(0, lambda t=tools_used[-1]: self._add_tool_log(t, "error"))
                         break
                     elif chunk_type == "done":
                         break
@@ -303,13 +316,21 @@ class MainWindow:
                 elif full_response:
                     self.root.after(0, lambda r=full_response: self.chat_interface.add_message(r, is_user=False))
             else:
-                # Non-streaming fallback
+                # Non-streaming fallback with execution logging
+                # Show "thinking" log
+                self.root.after(0, lambda: self._add_tool_log("SysAgent", "running", details="Processing..."))
+                
                 result = self.agent.process_command(message)
+                
+                duration = int((time.time() - start_time) * 1000)
                 
                 if result.get('success'):
                     response = result.get('message', 'Command executed successfully.')
+                    # Show success log
+                    self.root.after(0, lambda d=duration: self._add_tool_log("SysAgent", "success", d))
                 else:
                     response = result.get('message', 'Unknown error')
+                    self.root.after(0, lambda: self._add_tool_log("SysAgent", "error"))
                 
                 self.root.after(0, lambda r=response: self.chat_interface.add_message(r, is_user=False))
                 
@@ -318,7 +339,13 @@ class MainWindow:
             # Simplify context length error
             if "context_length" in error_msg:
                 error_msg = "Conversation too long. Please start a new chat."
+            self.root.after(0, lambda: self._add_tool_log("Error", "error"))
             self.root.after(0, lambda m=error_msg: self.chat_interface.add_message(f"Error: {m}", is_user=False))
+
+    def _add_tool_log(self, tool_name: str, status: str, duration_ms: int = 0, details: str = ""):
+        """Add a tool execution log to the chat."""
+        if hasattr(self.chat_interface, 'add_execution_log'):
+            self.chat_interface.add_execution_log(tool_name, "", status, duration_ms, details)
 
     def _update_stream(self, stream_data: dict, content: str):
         """Update stream content."""

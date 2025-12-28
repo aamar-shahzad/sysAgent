@@ -1,12 +1,13 @@
 """
-Chat Interface for SysAgent GUI - Improved Version.
+Chat Interface for SysAgent GUI - Improved Version with Follow-ups and Execution Logs.
 """
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext
 import threading
 import queue
-from typing import Optional, Callable, List
+import re
+from typing import Optional, Callable, List, Dict
 from datetime import datetime
 
 try:
@@ -14,6 +15,170 @@ try:
     USE_CUSTOMTKINTER = True
 except ImportError:
     USE_CUSTOMTKINTER = False
+
+
+class FollowUpGenerator:
+    """Generate contextual follow-up suggestions based on conversation."""
+    
+    # Topic-based follow-up suggestions
+    FOLLOWUPS = {
+        "system": [
+            "Show memory usage",
+            "Show disk space",
+            "List running processes",
+            "Check CPU temperature",
+        ],
+        "cpu": [
+            "Show top CPU processes",
+            "Monitor CPU for 10 seconds",
+            "Show system overview",
+        ],
+        "memory": [
+            "Show top memory processes",
+            "Clear memory cache",
+            "Show swap usage",
+        ],
+        "disk": [
+            "Find large files",
+            "Show disk partitions",
+            "Clean temp files",
+        ],
+        "process": [
+            "Show process details",
+            "Kill this process",
+            "Monitor process",
+        ],
+        "file": [
+            "List directory contents",
+            "Show file details",
+            "Search for files",
+            "Create backup",
+        ],
+        "browser": [
+            "Open in incognito",
+            "Show bookmarks",
+            "Close browser",
+            "Search Google",
+        ],
+        "git": [
+            "Show git log",
+            "Create new branch",
+            "Push changes",
+            "Pull latest",
+        ],
+        "volume": [
+            "Mute audio",
+            "Set volume to 50%",
+            "Unmute audio",
+        ],
+        "window": [
+            "Tile windows",
+            "Minimize all",
+            "List open windows",
+        ],
+        "note": [
+            "List all notes",
+            "Search notes",
+            "Create todo list",
+        ],
+        "spreadsheet": [
+            "Add more data",
+            "Create chart",
+            "Export to PDF",
+        ],
+        "network": [
+            "Check internet speed",
+            "Show network interfaces",
+            "Ping google.com",
+        ],
+        "package": [
+            "Update all packages",
+            "List installed packages",
+            "Search packages",
+        ],
+        "notification": [
+            "Set reminder for 1 hour",
+            "Send another notification",
+        ],
+        "email": [
+            "Send another email",
+            "Save as draft",
+        ],
+    }
+    
+    @classmethod
+    def generate(cls, query: str, response: str) -> List[str]:
+        """Generate follow-up suggestions based on query and response."""
+        suggestions = []
+        query_lower = query.lower()
+        response_lower = response.lower()
+        
+        # Detect topics from query and response
+        topics_detected = []
+        
+        topic_keywords = {
+            "system": ["system", "status", "overview", "info"],
+            "cpu": ["cpu", "processor", "usage"],
+            "memory": ["memory", "ram", "usage"],
+            "disk": ["disk", "storage", "space", "drive"],
+            "process": ["process", "running", "kill", "pid"],
+            "file": ["file", "folder", "directory", "document"],
+            "browser": ["browser", "chrome", "firefox", "safari", "url", "website"],
+            "git": ["git", "commit", "branch", "push", "pull", "repository"],
+            "volume": ["volume", "audio", "sound", "mute"],
+            "window": ["window", "minimize", "maximize", "tile"],
+            "note": ["note", "document", "text", "write"],
+            "spreadsheet": ["excel", "spreadsheet", "csv", "data entry"],
+            "network": ["network", "internet", "ping", "connection"],
+            "package": ["install", "package", "brew", "apt", "update"],
+            "notification": ["notification", "alert", "remind"],
+            "email": ["email", "mail", "send"],
+        }
+        
+        for topic, keywords in topic_keywords.items():
+            if any(kw in query_lower or kw in response_lower for kw in keywords):
+                topics_detected.append(topic)
+        
+        # Get suggestions for detected topics
+        for topic in topics_detected[:2]:  # Limit to 2 topics
+            if topic in cls.FOLLOWUPS:
+                suggestions.extend(cls.FOLLOWUPS[topic][:2])
+        
+        # Add general suggestions if not enough
+        if len(suggestions) < 3:
+            general = [
+                "Show system status",
+                "List running processes",
+                "Check disk space",
+            ]
+            for s in general:
+                if s not in suggestions:
+                    suggestions.append(s)
+                if len(suggestions) >= 4:
+                    break
+        
+        # Remove duplicates and limit
+        seen = set()
+        unique = []
+        for s in suggestions:
+            if s.lower() not in seen:
+                seen.add(s.lower())
+                unique.append(s)
+        
+        return unique[:4]
+
+
+class ExecutionLog:
+    """Represents a tool execution log entry."""
+    
+    def __init__(self, tool_name: str, action: str, status: str, 
+                 duration_ms: int = 0, details: str = ""):
+        self.tool_name = tool_name
+        self.action = action
+        self.status = status  # "running", "success", "error"
+        self.duration_ms = duration_ms
+        self.details = details
+        self.timestamp = datetime.now()
 
 
 class ChatMessage:
@@ -39,6 +204,9 @@ class ChatInterface:
         self.is_processing = False
         self.command_history: List[str] = []
         self.history_index = -1
+        self.last_query = ""
+        self.execution_logs: List[ExecutionLog] = []
+        self.followup_frame = None
         
         self._create_widgets()
         self._start_message_processor()
@@ -456,11 +624,157 @@ Type your message below or use a quick action to get started!"""
     
     def _add_user_message(self, content: str):
         """Add a user message."""
+        self.last_query = content
         self._add_message_bubble(content, is_user=True)
     
     def _add_assistant_message(self, content: str, message_type: str = "text"):
-        """Add an assistant message."""
+        """Add an assistant message with follow-up suggestions."""
         self._add_message_bubble(content, is_user=False, message_type=message_type)
+        
+        # Add follow-up suggestions
+        if self.last_query and USE_CUSTOMTKINTER:
+            suggestions = FollowUpGenerator.generate(self.last_query, content)
+            if suggestions:
+                self._add_followup_suggestions(suggestions)
+
+    def add_execution_log(self, tool_name: str, action: str = "", status: str = "running", 
+                         duration_ms: int = 0, details: str = ""):
+        """Add an execution log entry to the chat."""
+        log = ExecutionLog(tool_name, action, status, duration_ms, details)
+        self.execution_logs.append(log)
+        
+        if not USE_CUSTOMTKINTER:
+            return
+        
+        try:
+            if not self.messages_frame or not self.messages_frame.winfo_exists():
+                return
+        except:
+            return
+        
+        # Create log entry display
+        log_frame = ctk.CTkFrame(
+            self.messages_frame,
+            fg_color=("#e8f4f8", "#1a2a3a"),
+            corner_radius=8,
+            height=36
+        )
+        log_frame.pack(fill="x", padx=15, pady=2)
+        log_frame.pack_propagate(False)
+        
+        # Status icon
+        status_icons = {
+            "running": "⏳",
+            "success": "✅",
+            "error": "❌",
+            "info": "ℹ️"
+        }
+        icon = status_icons.get(status, "🔧")
+        
+        # Status colors
+        status_colors = {
+            "running": "#ffa500",
+            "success": "#00c853",
+            "error": "#ff5252",
+            "info": "#2196f3"
+        }
+        
+        # Content
+        content_frame = ctk.CTkFrame(log_frame, fg_color="transparent")
+        content_frame.pack(fill="both", expand=True, padx=10, pady=6)
+        
+        # Icon and tool name
+        ctk.CTkLabel(
+            content_frame,
+            text=f"{icon} {tool_name}",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=status_colors.get(status, "#888")
+        ).pack(side="left")
+        
+        # Action/details
+        if action or details:
+            text = action if action else details[:50]
+            ctk.CTkLabel(
+                content_frame,
+                text=f"  →  {text}",
+                font=ctk.CTkFont(size=11),
+                text_color=("gray50", "gray60")
+            ).pack(side="left")
+        
+        # Duration
+        if duration_ms > 0:
+            ctk.CTkLabel(
+                content_frame,
+                text=f"{duration_ms}ms",
+                font=ctk.CTkFont(size=10),
+                text_color=("gray60", "gray50")
+            ).pack(side="right")
+        
+        self._scroll_to_bottom()
+
+    def _add_followup_suggestions(self, suggestions: List[str]):
+        """Add follow-up suggestion buttons after a response."""
+        try:
+            if not self.messages_frame or not self.messages_frame.winfo_exists():
+                return
+        except:
+            return
+        
+        # Remove old followup frame if exists
+        if self.followup_frame:
+            try:
+                self.followup_frame.destroy()
+            except:
+                pass
+        
+        # Create new followup frame
+        self.followup_frame = ctk.CTkFrame(
+            self.messages_frame,
+            fg_color="transparent"
+        )
+        self.followup_frame.pack(fill="x", padx=15, pady=(5, 10))
+        
+        # Label
+        ctk.CTkLabel(
+            self.followup_frame,
+            text="💡 Follow-up:",
+            font=ctk.CTkFont(size=11),
+            text_color=("gray50", "gray60")
+        ).pack(side="left", padx=(0, 8))
+        
+        # Suggestion buttons
+        for suggestion in suggestions[:4]:
+            btn = ctk.CTkButton(
+                self.followup_frame,
+                text=suggestion,
+                width=len(suggestion) * 7 + 20,
+                height=26,
+                corner_radius=13,
+                font=ctk.CTkFont(size=11),
+                fg_color=("#e3f2fd", "#2a3a4a"),
+                hover_color=("#bbdefb", "#3a4a5a"),
+                text_color=("#1976d2", "#90caf9"),
+                command=lambda s=suggestion: self._send_followup(s)
+            )
+            btn.pack(side="left", padx=3)
+        
+        self._scroll_to_bottom()
+
+    def _send_followup(self, message: str):
+        """Send a follow-up suggestion as a new message."""
+        # Remove followup frame
+        if self.followup_frame:
+            try:
+                self.followup_frame.destroy()
+                self.followup_frame = None
+            except:
+                pass
+        
+        # Set input and send
+        if hasattr(self, 'input_text'):
+            self.input_text.delete("1.0", "end")
+            self.input_text.insert("1.0", message)
+            self._send_message()
 
     def add_streaming_message(self):
         """Create a streaming message bubble that can be updated."""
