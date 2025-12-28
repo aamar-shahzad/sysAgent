@@ -14,7 +14,7 @@
 - Support for OpenAI, Ollama, and local models
 - Context-aware responses and suggestions
 
-### 🛠️ Comprehensive System Tools (29 Tools)
+### 🛠️ Comprehensive System Tools (33+ Tools)
 
 **Core System Tools:**
 - **FileTool**: File operations, cleanup, organization
@@ -57,8 +57,44 @@
 - **OSIntelligenceTool**: OS-specific optimizations
 - **LowLevelOSTool**: Low-level OS operations
 
-### 🖥️ GUI Features
-- **Chat Interface**: Natural language interaction with SysAgent in a beautiful GUI
+### 🚀 Next-Level Features (NEW!)
+
+**Workflow Builder:**
+- **WorkflowTool**: Create and run multi-step automated workflows
+- Pre-built templates: Morning routine, Dev setup, System maintenance, End of day
+- Chain multiple actions into reusable sequences
+- Schedule workflows to run at specific times
+
+**Smart Search:**
+- **SmartSearchTool**: Unified search across files, apps, commands, and web
+- Find files by name or content
+- Search installed applications
+- Quick command lookup
+- Search history and recent files
+
+**AI-Powered Insights:**
+- **SystemInsightsTool**: Intelligent system analysis and recommendations
+- Health checks with scoring (0-100)
+- Performance analysis with suggestions
+- Security scanning and auditing
+- Resource hog detection
+- Storage analysis and cleanup suggestions
+- Network connection analysis
+
+**Smart Memory:**
+- **ContextMemoryTool**: Remember user preferences across sessions
+- Store favorites and frequently used commands
+- Learn usage patterns for smarter suggestions
+- Time-based contextual recommendations
+
+### 🖥️ Next-Level GUI Features
+- **Chat Interface**: Natural language interaction with markdown rendering & streaming
+- **Command Palette**: Quick command search with ⌘K / Ctrl+K (fuzzy search all commands)
+- **Quick Actions Bar**: One-click access to common actions
+- **Proactive Agent**: Intelligent suggestions based on system state
+- **Execution Logs**: Visual display of tool execution with status & timing
+- **Follow-up Suggestions**: Contextual suggestions after each response
+- **Workflow Runner**: Visual workflow management and execution
 - **Settings GUI**: Configure API keys, model providers, and permissions
 - **System Dashboard**: Real-time system monitoring with graphs
 - **Process Manager**: Visual process management interface
@@ -227,6 +263,48 @@ sysagent "optimize my startup programs"
 sysagent "set up my development environment"
 sysagent "monitor my project's resource usage"
 ```
+
+### 🚀 Next-Level Features
+
+```bash
+# Workflows - Chain multiple actions
+sysagent "run my morning routine"
+sysagent "create a workflow for project setup"
+sysagent "list all my workflows"
+sysagent "run the dev setup workflow"
+
+# Smart Search - Find anything
+sysagent "search for files about python"
+sysagent "find apps named code"
+sysagent "search my recent files"
+sysagent "search commands for git"
+
+# System Insights - AI-powered analysis
+sysagent "check my system health"
+sysagent "give me recommendations"
+sysagent "run a security scan"
+sysagent "find resource hogs"
+sysagent "analyze my storage usage"
+sysagent "quick insights"
+
+# Smart Memory - Remember preferences
+sysagent "remember my project is sysagent"
+sysagent "what was my project?"
+sysagent "add favorite command: check status"
+sysagent "suggest commands"
+```
+
+### ⌨️ Keyboard Shortcuts (GUI)
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+K` / `⌘K` | Open Command Palette |
+| `Ctrl+N` | New Chat |
+| `Ctrl+D` | Dashboard |
+| `Ctrl+S` | Settings |
+| `Ctrl+T` | Terminal |
+| `Ctrl+I` | Quick Insights |
+| `Ctrl+Q` | Quit |
 
 ### GUI Commands
 

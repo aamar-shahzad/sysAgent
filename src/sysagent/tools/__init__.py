@@ -32,6 +32,10 @@ from .package_manager_tool import PackageManagerTool
 from .git_tool import GitTool
 from .api_tool import APITool
 from .email_tool import EmailTool
+from .workflow_tool import WorkflowTool
+from .smart_search_tool import SmartSearchTool
+from .system_insights_tool import SystemInsightsTool
+from .context_memory_tool import ContextMemoryTool
 
 __all__ = [
     "BaseTool",
@@ -68,4 +72,8 @@ __all__ = [
     "GitTool",
     "APITool",
     "EmailTool",
+    "WorkflowTool",
+    "SmartSearchTool",
+    "SystemInsightsTool",
+    "ContextMemoryTool",
 ] 
