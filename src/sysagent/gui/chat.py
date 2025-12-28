@@ -38,6 +38,12 @@ except ImportError:
     def get_monitor():
         return None
 
+try:
+    from ..core.deep_agent import DeepAgent, ReasoningStep
+    DEEP_AGENT_AVAILABLE = True
+except ImportError:
+    DEEP_AGENT_AVAILABLE = False
+
 
 class MessageType(Enum):
     USER = "user"
@@ -182,6 +188,109 @@ class TypingIndicator:
         self.dots = []
 
 
+class ReasoningPanel:
+    """Panel showing agent's reasoning process."""
+    
+    def __init__(self, parent, colors: dict):
+        self.parent = parent
+        self.colors = colors
+        self.frame = None
+        self.steps_frame = None
+        self.is_visible = False
+    
+    def show(self):
+        """Show reasoning panel."""
+        if not CTK_AVAILABLE or self.is_visible:
+            return
+        
+        self.is_visible = True
+        
+        self.frame = ctk.CTkFrame(
+            self.parent,
+            fg_color=self.colors["bg_secondary"],
+            corner_radius=10,
+            border_width=1,
+            border_color=self.colors["accent"]
+        )
+        self.frame.pack(fill="x", padx=16, pady=8)
+        
+        # Header
+        header = ctk.CTkFrame(self.frame, fg_color="transparent")
+        header.pack(fill="x", padx=12, pady=(10, 5))
+        
+        ctk.CTkLabel(
+            header,
+            text="🧠 Agent Reasoning",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=self.colors["accent"]
+        ).pack(side="left")
+        
+        # Steps container
+        self.steps_frame = ctk.CTkFrame(self.frame, fg_color="transparent")
+        self.steps_frame.pack(fill="x", padx=12, pady=(0, 10))
+    
+    def add_step(self, step_type: str, content: str):
+        """Add a reasoning step."""
+        if not self.steps_frame or not CTK_AVAILABLE:
+            return
+        
+        icons = {
+            "planning": "📋",
+            "analysis": "🔍",
+            "execution": "▶️",
+            "reflection": "🪞",
+            "error_recovery": "🔧",
+            "tool_selection": "🔧",
+        }
+        
+        icon = icons.get(step_type, "•")
+        
+        step_frame = ctk.CTkFrame(self.steps_frame, fg_color="transparent")
+        step_frame.pack(fill="x", anchor="w", pady=2)
+        
+        ctk.CTkLabel(
+            step_frame,
+            text=f"{icon} {content}",
+            font=ctk.CTkFont(size=11),
+            text_color=self.colors["text_secondary"],
+            anchor="w"
+        ).pack(side="left")
+    
+    def set_progress(self, current: int, total: int, description: str):
+        """Show progress bar."""
+        if not self.steps_frame or not CTK_AVAILABLE:
+            return
+        
+        # Clear and add progress
+        for w in self.steps_frame.winfo_children():
+            w.destroy()
+        
+        progress_frame = ctk.CTkFrame(self.steps_frame, fg_color="transparent")
+        progress_frame.pack(fill="x", pady=5)
+        
+        ctk.CTkLabel(
+            progress_frame,
+            text=f"Step {current}/{total}: {description[:40]}...",
+            font=ctk.CTkFont(size=11),
+            text_color=self.colors["text"]
+        ).pack(anchor="w")
+        
+        bar = ctk.CTkProgressBar(progress_frame, width=300, height=8)
+        bar.set(current / total if total > 0 else 0)
+        bar.pack(anchor="w", pady=(5, 0))
+    
+    def hide(self):
+        """Hide reasoning panel."""
+        self.is_visible = False
+        if self.frame:
+            try:
+                self.frame.destroy()
+            except Exception:
+                pass
+        self.frame = None
+        self.steps_frame = None
+
+
 class ToolIndicator:
     """Smooth tool execution indicator."""
     
@@ -299,7 +408,9 @@ class ChatInterface:
         
         self.typing_indicator: Optional[TypingIndicator] = None
         self.tool_indicator: Optional[ToolIndicator] = None
+        self.reasoning_panel: Optional[ReasoningPanel] = None
         self.stream_data: Optional[Dict] = None
+        self.show_reasoning = True  # Toggle for showing reasoning
         
         self._create_ui()
         self._start_queue_processor()
@@ -1019,6 +1130,37 @@ class ChatInterface:
             self.typing_indicator.hide()
             self.typing_indicator = None
     
+    def _show_reasoning(self):
+        """Show reasoning panel."""
+        if not self.show_reasoning:
+            return
+        self._hide_reasoning()
+        self.reasoning_panel = ReasoningPanel(self.messages_frame, self.colors)
+        self.reasoning_panel.show()
+        self._scroll_to_bottom()
+    
+    def _hide_reasoning(self):
+        """Hide reasoning panel."""
+        if self.reasoning_panel:
+            self.reasoning_panel.hide()
+            self.reasoning_panel = None
+    
+    def add_reasoning_step(self, step_type: str, content: str):
+        """Add a reasoning step to the panel."""
+        if not self.reasoning_panel:
+            self._show_reasoning()
+        if self.reasoning_panel:
+            self.reasoning_panel.add_step(step_type, content)
+            self._scroll_to_bottom()
+    
+    def update_reasoning_progress(self, current: int, total: int, description: str):
+        """Update reasoning progress."""
+        if not self.reasoning_panel:
+            self._show_reasoning()
+        if self.reasoning_panel:
+            self.reasoning_panel.set_progress(current, total, description)
+            self._scroll_to_bottom()
+    
     def _add_message(self, content: str, msg_type: MessageType):
         """Add message."""
         message = ChatMessage(content=content, msg_type=msg_type)
@@ -1103,6 +1245,22 @@ class ChatInterface:
                 command=cmd
             )
             btn.pack(side="left", padx=2)
+        
+        # Feedback buttons
+        ctk.CTkLabel(actions, text="  ", width=20).pack(side="left")
+        
+        for rating, icon in [(5, "👍"), (1, "👎")]:
+            btn = ctk.CTkButton(
+                actions,
+                text=icon,
+                width=26,
+                height=24,
+                corner_radius=4,
+                fg_color="transparent",
+                hover_color=self.colors["bg_hover"],
+                command=lambda r=rating, c=message.content: self._record_feedback(r, c)
+            )
+            btn.pack(side="left", padx=1)
         
         # Follow-ups
         self._add_followups(content_frame)
@@ -1416,6 +1574,24 @@ Just type a message below to get started!"""
         """Retry last."""
         if self.last_query:
             self._send_message_direct(self.last_query)
+    
+    def _record_feedback(self, rating: int, content: str):
+        """Record feedback on a response."""
+        try:
+            if LEARNING_AVAILABLE:
+                learning = get_learning_system()
+                if learning and hasattr(learning, 'record_command'):
+                    # Store feedback as a pattern
+                    learning.record_command(
+                        f"feedback_{rating}_{content[:50]}",
+                        success=rating >= 4
+                    )
+            
+            # Show feedback received
+            icon = "👍" if rating >= 4 else "👎"
+            self._toast(f"{icon} Feedback recorded!")
+        except Exception:
+            pass
     
     def _export_chat(self):
         """Export chat."""

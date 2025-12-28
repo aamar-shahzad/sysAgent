@@ -41,6 +41,12 @@ try:
 except ImportError:
     CLIPBOARD_AVAILABLE = False
 
+try:
+    from ..core.deep_agent import DeepAgent, create_deep_agent
+    DEEP_AGENT_AVAILABLE = True
+except ImportError:
+    DEEP_AGENT_AVAILABLE = False
+
 
 # Theme colors
 COLORS = {
@@ -85,7 +91,7 @@ class MainWindow:
         self._start_background_tasks()
 
     def _initialize_agent(self):
-        """Initialize the LangGraph agent."""
+        """Initialize the LangGraph agent and Deep Agent wrapper."""
         try:
             from ..core.config import ConfigManager
             from ..core.permissions import PermissionManager
@@ -94,9 +100,16 @@ class MainWindow:
             self.config_manager = ConfigManager()
             self.permission_manager = PermissionManager(self.config_manager)
             self.agent = LangGraphAgent(self.config_manager, self.permission_manager)
+            
+            # Create Deep Agent wrapper for advanced features
+            if DEEP_AGENT_AVAILABLE and self.agent:
+                self.deep_agent = create_deep_agent(self.agent)
+            else:
+                self.deep_agent = None
         except Exception as e:
             print(f"Warning: Could not initialize agent: {e}")
             self.agent = None
+            self.deep_agent = None
             self.config_manager = None
             self.permission_manager = None
     
@@ -1410,7 +1423,7 @@ class MainWindow:
                 self.chat_interface.add_message("Agent not initialized. Please configure your API key.", is_user=False, message_type="error")
     
     def _process_chat_message(self, message: str):
-        """Process chat message in background."""
+        """Process chat message in background with deep agent reasoning."""
         start_time = time.time()
         
         try:
@@ -1418,58 +1431,127 @@ class MainWindow:
             if self.learning:
                 self.learning.record_command(message, success=True)
             
-            # Try streaming
-            if hasattr(self.agent, 'process_command_streaming'):
-                stream_data = None
-                try:
-                    self.root.after(0, lambda: setattr(self, '_stream_data', self.chat_interface.add_streaming_message()))
-                    time.sleep(0.05)
-                    stream_data = getattr(self, '_stream_data', None)
-                except Exception:
-                    pass
-                
-                full_response = ""
-                
-                for chunk in self.agent.process_command_streaming(message):
-                    chunk_type = chunk.get("type", "")
-                    content = chunk.get("content", "")
-                    
-                    if chunk_type == "content" and content:
-                        full_response = content
-                        if stream_data:
-                            stream_data["content"] = content
-                            self.root.after(0, lambda c=content: self._update_stream(stream_data, c))
-                    elif chunk_type == "token" and content:
-                        full_response += content
-                        if stream_data:
-                            self.root.after(0, lambda t=content: self.chat_interface.update_streaming_message(stream_data, t))
-                    elif chunk_type == "tool_call":
-                        name = chunk.get("name", "tool")
-                        self.root.after(0, lambda n=name: self.chat_interface.add_execution_log(n, "", "running"))
-                    elif chunk_type == "tool_result":
-                        duration = int((time.time() - start_time) * 1000)
-                        self.root.after(0, lambda d=duration: self.chat_interface.add_execution_log("", "", "success", d))
-                    elif chunk_type == "error":
-                        full_response = f"Error: {content}"
-                        break
-                    elif chunk_type == "done":
-                        break
-                
-                if stream_data:
-                    self.root.after(0, lambda: self.chat_interface.finish_streaming_message(stream_data))
-                elif full_response:
-                    self.root.after(0, lambda r=full_response: self.chat_interface.add_message(r, is_user=False))
+            # Use deep agent if available for complex tasks
+            if self.deep_agent:
+                self._process_with_deep_agent(message, start_time)
+            elif hasattr(self.agent, 'process_command_streaming'):
+                self._process_with_streaming(message, start_time)
             else:
-                result = self.agent.process_command(message)
-                response = result.get('message', 'Done') if result.get('success') else result.get('message', 'Error')
-                msg_type = "text" if result.get('success') else "error"
-                self.root.after(0, lambda: self.chat_interface.add_message(response, is_user=False, message_type=msg_type))
+                self._process_simple(message)
         
         except Exception as e:
             error_msg = str(e)
             if "context_length" in error_msg:
                 error_msg = "Conversation too long. Please start a new chat."
             self.root.after(0, lambda: self.chat_interface.add_message(f"Error: {error_msg}", is_user=False, message_type="error"))
+    
+    def _process_with_deep_agent(self, message: str, start_time: float):
+        """Process with deep agent showing reasoning."""
+        try:
+            for update in self.deep_agent.process_with_reasoning(message):
+                update_type = update.get('type', '')
+                
+                if update_type == 'reasoning':
+                    step = update.get('step', '')
+                    self.root.after(0, lambda s=step: self.chat_interface.add_reasoning_step('analysis', s))
+                
+                elif update_type == 'analysis':
+                    complexity = update.get('complexity', 0)
+                    needs_planning = update.get('needs_planning', False)
+                    if needs_planning:
+                        self.root.after(0, lambda: self.chat_interface.add_reasoning_step(
+                            'planning', f'Complex task detected (score: {complexity}), creating plan...'
+                        ))
+                
+                elif update_type == 'plan':
+                    steps = update.get('steps', [])
+                    self.root.after(0, lambda s=steps: self.chat_interface.add_reasoning_step(
+                        'planning', f'Plan created with {len(s)} steps'
+                    ))
+                
+                elif update_type == 'progress':
+                    step = update.get('step', 0)
+                    total = update.get('total', 1)
+                    desc = update.get('description', '')
+                    self.root.after(0, lambda s=step, t=total, d=desc: 
+                        self.chat_interface.update_reasoning_progress(s, t, d)
+                    )
+                
+                elif update_type == 'step_result':
+                    success = update.get('success', False)
+                    result = update.get('result', '')
+                    if not success:
+                        error = update.get('error', '')
+                        self.root.after(0, lambda e=error: self.chat_interface.add_reasoning_step(
+                            'error_recovery', f'Step failed: {e[:50]}...'
+                        ))
+                
+                elif update_type == 'final':
+                    response = update.get('response', 'Done')
+                    quality = update.get('quality_score', 0)
+                    duration = update.get('duration_ms', 0)
+                    
+                    # Hide reasoning panel and show response
+                    self.root.after(0, lambda: self.chat_interface._hide_reasoning())
+                    self.root.after(50, lambda r=response: self.chat_interface.add_message(r, is_user=False))
+                    
+                    # Show quality indicator if enabled
+                    if quality > 0:
+                        self.root.after(100, lambda q=quality, d=duration: 
+                            self.chat_interface._toast(f"Quality: {q:.0f}% | {d}ms")
+                        )
+        except Exception as e:
+            # Fallback to simple processing
+            self._process_simple(message)
+    
+    def _process_with_streaming(self, message: str, start_time: float):
+        """Process with streaming."""
+        stream_data = None
+        try:
+            self.root.after(0, lambda: setattr(self, '_stream_data', self.chat_interface.add_streaming_message()))
+            time.sleep(0.05)
+            stream_data = getattr(self, '_stream_data', None)
+        except Exception:
+            pass
+        
+        full_response = ""
+        
+        for chunk in self.agent.process_command_streaming(message):
+            chunk_type = chunk.get("type", "")
+            content = chunk.get("content", "")
+            
+            if chunk_type == "content" and content:
+                full_response = content
+                if stream_data:
+                    stream_data["content"] = content
+                    self.root.after(0, lambda c=content: self._update_stream(stream_data, c))
+            elif chunk_type == "token" and content:
+                full_response += content
+                if stream_data:
+                    self.root.after(0, lambda t=content: self.chat_interface.update_streaming_message(stream_data, t))
+            elif chunk_type == "tool_call":
+                name = chunk.get("name", "tool")
+                self.root.after(0, lambda n=name: self.chat_interface.add_execution_log(n, "", "running"))
+            elif chunk_type == "tool_result":
+                duration = int((time.time() - start_time) * 1000)
+                self.root.after(0, lambda d=duration: self.chat_interface.add_execution_log("", "", "success", d))
+            elif chunk_type == "error":
+                full_response = f"Error: {content}"
+                break
+            elif chunk_type == "done":
+                break
+        
+        if stream_data:
+            self.root.after(0, lambda: self.chat_interface.finish_streaming_message(stream_data))
+        elif full_response:
+            self.root.after(0, lambda r=full_response: self.chat_interface.add_message(r, is_user=False))
+    
+    def _process_simple(self, message: str):
+        """Process with simple agent call."""
+        result = self.agent.process_command(message)
+        response = result.get('message', 'Done') if result.get('success') else result.get('message', 'Error')
+        msg_type = "text" if result.get('success') else "error"
+        self.root.after(0, lambda: self.chat_interface.add_message(response, is_user=False, message_type=msg_type))
     
     def _update_stream(self, stream_data: dict, content: str):
         """Update streaming message."""
