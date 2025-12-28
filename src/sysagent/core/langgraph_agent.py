@@ -80,20 +80,41 @@ class LangGraphAgent:
 
     def _get_model_name(self) -> str:
         """Get the model name from config or use a sensible default."""
-        # Check config first
-        if hasattr(self.config, 'agent') and hasattr(self.config.agent, 'model'):
-            configured_model = self.config.agent.model
-            if configured_model:
-                return configured_model
-        
-        # Check environment
+        # Check environment first (allows override)
         env_model = os.environ.get("OPENAI_MODEL") or os.environ.get("SYSAGENT_MODEL")
         if env_model:
             return env_model
         
+        # Check config
+        if hasattr(self.config, 'agent') and hasattr(self.config.agent, 'model'):
+            configured_model = self.config.agent.model
+            if configured_model:
+                # Upgrade old gpt-4 configs to gpt-4o-mini for larger context
+                if configured_model in ["gpt-4", "gpt-4-0613", "gpt-3.5-turbo"]:
+                    return "gpt-4o-mini"
+                return configured_model
+        
         # Default to gpt-4o-mini which has 128k context and is cost-effective
-        # Fallback order: gpt-4o-mini > gpt-4-turbo > gpt-4
         return "gpt-4o-mini"
+    
+    def _trim_conversation_history(self, messages: List[Any], max_messages: int = 10) -> List[Any]:
+        """Trim conversation history to prevent context overflow."""
+        if len(messages) <= max_messages:
+            return messages
+        
+        # Keep the system message if present, then the last N messages
+        trimmed = []
+        for msg in messages:
+            if hasattr(msg, 'type') and msg.type == 'system':
+                trimmed.append(msg)
+                break
+            elif isinstance(msg, dict) and msg.get('role') == 'system':
+                trimmed.append(msg)
+                break
+        
+        # Add the most recent messages
+        trimmed.extend(messages[-(max_messages):])
+        return trimmed
 
     def _load_api_key(self) -> Optional[str]:
         """Load OpenAI API key from various sources."""
@@ -629,12 +650,9 @@ Be direct and helpful. Always use real data from tools."""
                 # Resume from interrupt
                 result = self.agent.invoke(user_input)
             else:
-                # Regular user input
-                # Get conversation history
-                history = self.get_conversation_history()
-                
-                # Create messages for the agent
-                messages = history + [{"role": "user", "content": user_input}]
+                # Regular user input - use minimal history to prevent context overflow
+                # Only include the current message, let the agent handle the context
+                messages = [{"role": "user", "content": user_input}]
                 
                 # Run the React agent
                 result = self.agent.invoke({"messages": messages})
@@ -650,34 +668,77 @@ Be direct and helpful. Always use real data from tools."""
                 }
             
             # Extract the response
-            if "messages" in result and result["messages"]:
-                # Get the last assistant message
-                for msg in reversed(result["messages"]):
-                    if hasattr(msg, 'content') and hasattr(msg, 'type') and msg.type == "ai":
-                        ai_response = msg.content
-                        break
-                    elif isinstance(msg, dict) and msg.get("role") == "assistant":
-                        ai_response = msg.get("content", "")
-                        break
-                else:
-                    ai_response = "Command processed successfully"
-            else:
-                ai_response = "No response generated"
+            ai_response = self._extract_response(result)
             
             return {
                 "success": True,
                 "message": ai_response,
-                "data": result,
+                "data": {},  # Don't return full result to avoid memory issues
                 "tools_used": result.get("tools_used", [])
             }
                 
         except Exception as e:
+            error_msg = str(e)
+            # Provide helpful error for context length issues
+            if "context_length_exceeded" in error_msg or "maximum context length" in error_msg:
+                return {
+                    "success": False,
+                    "message": "The conversation got too long. Starting fresh. Please try your request again.",
+                    "data": {},
+                    "tools_used": []
+                }
             return {
                 "success": False,
-                "message": f"Error processing command: {str(e)}",
+                "message": f"Error processing command: {error_msg}",
                 "data": {},
                 "tools_used": []
             }
+
+    def _extract_response(self, result: Dict[str, Any]) -> str:
+        """Extract the AI response from the result."""
+        if "messages" in result and result["messages"]:
+            for msg in reversed(result["messages"]):
+                if hasattr(msg, 'content') and hasattr(msg, 'type') and msg.type == "ai":
+                    if msg.content:  # Skip empty messages (tool calls)
+                        return msg.content
+                elif isinstance(msg, dict) and msg.get("role") == "assistant":
+                    content = msg.get("content", "")
+                    if content:
+                        return content
+        return "Command processed successfully"
+
+    def process_command_streaming(self, user_input: str):
+        """Process a command with streaming output. Yields tokens as they arrive."""
+        try:
+            messages = [{"role": "user", "content": user_input}]
+            
+            # Use stream method for streaming output
+            for chunk in self.agent.stream({"messages": messages}):
+                # Extract content from the chunk
+                if "messages" in chunk:
+                    for msg in chunk["messages"]:
+                        if hasattr(msg, 'content') and msg.content:
+                            yield {"type": "token", "content": msg.content}
+                        elif hasattr(msg, 'tool_calls') and msg.tool_calls:
+                            for tc in msg.tool_calls:
+                                yield {"type": "tool_call", "name": tc.get("name", "unknown")}
+                
+                # Handle agent node output
+                if "agent" in chunk:
+                    agent_output = chunk["agent"]
+                    if "messages" in agent_output:
+                        for msg in agent_output["messages"]:
+                            if hasattr(msg, 'content') and msg.content:
+                                yield {"type": "content", "content": msg.content}
+                
+                # Handle tool node output
+                if "tools" in chunk:
+                    yield {"type": "tool_result", "content": "Tool executed"}
+            
+            yield {"type": "done"}
+            
+        except Exception as e:
+            yield {"type": "error", "content": str(e)}
 
     async def process_command_async(self, user_input: str) -> Dict[str, Any]:
         """Process a command asynchronously (for compatibility)."""
@@ -685,22 +746,9 @@ Be direct and helpful. Always use real data from tools."""
 
     def get_conversation_history(self, session_id: str = None) -> List[Dict[str, Any]]:
         """Get conversation history for a session."""
-        if session_id is None:
-            session_id = self.session_id
-        
-        try:
-            # For now, return empty history - can be enhanced later
-            return []
-        except Exception:
-            return []
+        # Return empty - we don't persist history to avoid context overflow
+        return []
 
     def clear_conversation_history(self, session_id: str = None):
         """Clear conversation history for a session."""
-        if session_id is None:
-            session_id = self.session_id
-        
-        try:
-            # For now, just reset the session ID
-            self.session_id = str(int(time.time()))
-        except Exception:
-            pass 
+        self.session_id = str(int(time.time())) 

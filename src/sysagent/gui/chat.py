@@ -461,6 +461,95 @@ Type your message below or use a quick action to get started!"""
     def _add_assistant_message(self, content: str, message_type: str = "text"):
         """Add an assistant message."""
         self._add_message_bubble(content, is_user=False, message_type=message_type)
+
+    def add_streaming_message(self):
+        """Create a streaming message bubble that can be updated."""
+        try:
+            if not self.messages_frame or not self.messages_frame.winfo_exists():
+                return None
+        except Exception:
+            return None
+        
+        if not USE_CUSTOMTKINTER:
+            return None
+        
+        timestamp = datetime.now().strftime("%H:%M")
+        
+        # Container
+        container = ctk.CTkFrame(self.messages_frame, fg_color="transparent")
+        container.pack(fill="x", padx=10, pady=5)
+        
+        # Bubble
+        bubble = ctk.CTkFrame(container, fg_color=("gray85", "gray20"), corner_radius=12)
+        bubble.pack(anchor="w", padx=5, pady=2)
+        
+        # Header
+        header_frame = ctk.CTkFrame(bubble, fg_color="transparent")
+        header_frame.pack(fill="x", padx=10, pady=(6, 2))
+        
+        ctk.CTkLabel(
+            header_frame,
+            text=f"🧠 SysAgent  •  {timestamp}",
+            font=ctk.CTkFont(size=10),
+            text_color="gray50"
+        ).pack(side="left")
+        
+        # Streaming content label
+        content_label = ctk.CTkLabel(
+            bubble,
+            text="▌",  # Cursor
+            font=ctk.CTkFont(size=13),
+            wraplength=550,
+            justify="left"
+        )
+        content_label.pack(anchor="w", padx=10, pady=(2, 6))
+        
+        self._scroll_to_bottom()
+        
+        return {"container": container, "bubble": bubble, "label": content_label, "content": ""}
+
+    def update_streaming_message(self, stream_data: dict, token: str):
+        """Update a streaming message with new content."""
+        if stream_data and "label" in stream_data:
+            stream_data["content"] += token
+            try:
+                stream_data["label"].configure(text=stream_data["content"] + "▌")
+                self._scroll_to_bottom()
+            except Exception:
+                pass
+
+    def finish_streaming_message(self, stream_data: dict):
+        """Finalize a streaming message."""
+        if stream_data and "label" in stream_data:
+            try:
+                # Remove cursor
+                stream_data["label"].configure(text=stream_data["content"])
+                
+                # Add action buttons
+                if USE_CUSTOMTKINTER:
+                    bubble = stream_data["bubble"]
+                    content = stream_data["content"]
+                    
+                    actions_frame = ctk.CTkFrame(bubble, fg_color="transparent")
+                    actions_frame.pack(fill="x", padx=8, pady=(0, 6))
+                    
+                    for btn_text, btn_cmd in [
+                        ("📋", lambda c=content: self._copy_to_clipboard(c)),
+                        ("💾", lambda c=content: self._save_message_to_file(c)),
+                    ]:
+                        ctk.CTkButton(
+                            actions_frame,
+                            text=btn_text,
+                            width=28,
+                            height=20,
+                            corner_radius=4,
+                            font=ctk.CTkFont(size=10),
+                            fg_color="transparent",
+                            hover_color=("gray70", "gray40"),
+                            command=btn_cmd
+                        ).pack(side="left", padx=1)
+            except Exception:
+                pass
     
     def _add_system_message(self, content: str):
         """Add a system message with special styling."""
@@ -500,8 +589,35 @@ Type your message below or use a quick action to get started!"""
             )
             msg_label.pack(padx=15, pady=10)
     
+    def _parse_markdown(self, content: str) -> List[dict]:
+        """Parse markdown content into segments for rendering."""
+        import re
+        segments = []
+        
+        # Split by code blocks first
+        code_pattern = r'```(\w+)?\n?(.*?)```'
+        parts = re.split(code_pattern, content, flags=re.DOTALL)
+        
+        i = 0
+        while i < len(parts):
+            text = parts[i]
+            if text.strip():
+                # Parse inline formatting
+                segments.append({"type": "text", "content": text.strip()})
+            i += 1
+            
+            # Check for code block (language and code follow)
+            if i + 1 < len(parts):
+                lang = parts[i] or "text"
+                code = parts[i + 1]
+                if code.strip():
+                    segments.append({"type": "code", "language": lang, "content": code.strip()})
+                i += 2
+        
+        return segments if segments else [{"type": "text", "content": content}]
+
     def _add_message_bubble(self, content: str, is_user: bool, message_type: str = "text"):
-        """Add a message bubble with improved styling."""
+        """Add a message bubble with markdown rendering."""
         try:
             if not self.messages_frame or not self.messages_frame.winfo_exists():
                 return
@@ -520,7 +636,7 @@ Type your message below or use a quick action to get started!"""
                 anchor = "e"
                 bg_color = "#1a73e8"  # Google blue
                 text_color = "white"
-                max_width = 450
+                max_width = 500
             else:
                 anchor = "w"
                 if message_type == "error":
@@ -529,133 +645,99 @@ Type your message below or use a quick action to get started!"""
                 elif message_type == "success":
                     bg_color = "#388e3c"
                     text_color = "white"
-                elif message_type == "code":
-                    bg_color = "#263238"
-                    text_color = "#80cbc4"
                 else:
-                    bg_color = ("gray80", "gray25")
+                    bg_color = ("gray85", "gray20")
                     text_color = ("gray10", "gray90")
-                max_width = 500
+                max_width = 550
             
             # Message bubble
-            bubble = ctk.CTkFrame(container, fg_color=bg_color, corner_radius=18)
-            bubble.pack(anchor=anchor, padx=5)
+            bubble = ctk.CTkFrame(container, fg_color=bg_color, corner_radius=12)
+            bubble.pack(anchor=anchor, padx=5, pady=2)
             
-            # Avatar and sender
+            # Compact header
             header_frame = ctk.CTkFrame(bubble, fg_color="transparent")
-            header_frame.pack(fill="x", padx=12, pady=(10, 2))
+            header_frame.pack(fill="x", padx=10, pady=(6, 2))
             
             avatar = "👤" if is_user else "🧠"
             sender = "You" if is_user else "SysAgent"
             
-            avatar_label = ctk.CTkLabel(
+            ctk.CTkLabel(
                 header_frame,
-                text=f"{avatar} {sender}",
-                font=ctk.CTkFont(size=11, weight="bold"),
-                text_color=text_color if isinstance(text_color, str) else None
-            )
-            avatar_label.pack(side="left")
-            
-            time_label = ctk.CTkLabel(
-                header_frame,
-                text=timestamp,
+                text=f"{avatar} {sender}  •  {timestamp}",
                 font=ctk.CTkFont(size=10),
                 text_color="gray60" if is_user else "gray50"
-            )
-            time_label.pack(side="right")
+            ).pack(side="left")
             
-            # Message content
-            msg_label = ctk.CTkLabel(
-                bubble,
-                text=content,
-                font=ctk.CTkFont(size=13, family="Consolas" if message_type == "code" else None),
-                text_color=text_color if isinstance(text_color, str) else None,
-                wraplength=max_width,
-                justify="left"
-            )
-            msg_label.pack(anchor="w", padx=12, pady=(2, 10))
+            # Parse and render markdown content
+            segments = self._parse_markdown(content)
             
-            # Action buttons frame
-            actions_frame = ctk.CTkFrame(bubble, fg_color="transparent")
-            actions_frame.pack(fill="x", padx=10, pady=(0, 8))
+            for segment in segments:
+                if segment["type"] == "code":
+                    # Code block with dark background
+                    code_frame = ctk.CTkFrame(bubble, fg_color="#1e1e1e", corner_radius=8)
+                    code_frame.pack(fill="x", padx=8, pady=4)
+                    
+                    # Language label
+                    lang = segment.get("language", "")
+                    if lang:
+                        ctk.CTkLabel(
+                            code_frame,
+                            text=lang,
+                            font=ctk.CTkFont(size=9),
+                            text_color="#888888"
+                        ).pack(anchor="w", padx=8, pady=(4, 0))
+                    
+                    # Code content
+                    ctk.CTkLabel(
+                        code_frame,
+                        text=segment["content"],
+                        font=ctk.CTkFont(size=11, family="Consolas"),
+                        text_color="#d4d4d4",
+                        wraplength=max_width - 40,
+                        justify="left"
+                    ).pack(anchor="w", padx=8, pady=(2, 8))
+                else:
+                    # Regular text - clean up formatting
+                    text = segment["content"]
+                    # Convert markdown bold/italic to plain text (tkinter doesn't support inline styles)
+                    import re
+                    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # Bold
+                    text = re.sub(r'\*(.+?)\*', r'\1', text)      # Italic
+                    text = re.sub(r'`(.+?)`', r'\1', text)        # Inline code
+                    
+                    ctk.CTkLabel(
+                        bubble,
+                        text=text,
+                        font=ctk.CTkFont(size=13),
+                        text_color=text_color if isinstance(text_color, str) else None,
+                        wraplength=max_width,
+                        justify="left"
+                    ).pack(anchor="w", padx=10, pady=(2, 6))
             
-            # Copy button
-            copy_btn = ctk.CTkButton(
-                actions_frame,
-                text="📋 Copy",
-                width=55,
-                height=22,
-                corner_radius=5,
-                font=ctk.CTkFont(size=10),
-                fg_color="transparent",
-                hover_color=("gray70", "gray40"),
-                command=lambda c=content: self._copy_to_clipboard(c)
-            )
-            copy_btn.pack(side="left", padx=2)
-            
-            # Save to file button
-            save_btn = ctk.CTkButton(
-                actions_frame,
-                text="💾 Save",
-                width=55,
-                height=22,
-                corner_radius=5,
-                font=ctk.CTkFont(size=10),
-                fg_color="transparent",
-                hover_color=("gray70", "gray40"),
-                command=lambda c=content: self._save_message_to_file(c)
-            )
-            save_btn.pack(side="left", padx=2)
-            
-            # More actions for assistant messages
+            # Compact action buttons (only for assistant messages)
             if not is_user:
-                # Retry button
-                retry_btn = ctk.CTkButton(
-                    actions_frame,
-                    text="🔄 Retry",
-                    width=55,
-                    height=22,
-                    corner_radius=5,
-                    font=ctk.CTkFont(size=10),
-                    fg_color="transparent",
-                    hover_color=("gray70", "gray40"),
-                    command=lambda: self._retry_last_message()
-                )
-                retry_btn.pack(side="left", padx=2)
+                actions_frame = ctk.CTkFrame(bubble, fg_color="transparent")
+                actions_frame.pack(fill="x", padx=8, pady=(0, 6))
                 
-                # Open in app button (for code/data)
-                if message_type in ["code", "text"] or "```" in content:
-                    open_btn = ctk.CTkButton(
+                for btn_text, btn_cmd in [
+                    ("📋", lambda c=content: self._copy_to_clipboard(c)),
+                    ("💾", lambda c=content: self._save_message_to_file(c)),
+                    ("🔄", lambda: self._retry_last_message()),
+                ]:
+                    ctk.CTkButton(
                         actions_frame,
-                        text="📝 Open",
-                        width=55,
-                        height=22,
-                        corner_radius=5,
+                        text=btn_text,
+                        width=28,
+                        height=20,
+                        corner_radius=4,
                         font=ctk.CTkFont(size=10),
                         fg_color="transparent",
                         hover_color=("gray70", "gray40"),
-                        command=lambda c=content: self._open_in_editor(c)
-                    )
-                    open_btn.pack(side="left", padx=2)
+                        command=btn_cmd
+                    ).pack(side="left", padx=1)
             
             # Bind right-click context menu
             self._bind_context_menu(bubble, content, is_user)
-            self._bind_context_menu(msg_label, content, is_user)
-            
-            # Legacy copy button removed - replaced with action buttons above
-            if False:  # Disabled
-                copy_btn = ctk.CTkButton(
-                    bubble,
-                    text="📋 Copy",
-                    width=60,
-                    height=22,
-                    corner_radius=5,
-                    font=ctk.CTkFont(size=10),
-                    fg_color="transparent",
-                    hover_color=("gray70", "gray40"),
-                    command=lambda c=content: self._copy_to_clipboard(c)
-                )
-                copy_btn.pack(anchor="e", padx=10, pady=(0, 8))
         else:
             container = ttk.Frame(self.messages_frame)
             container.pack(fill="x", padx=10, pady=5)
