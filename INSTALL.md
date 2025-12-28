@@ -27,28 +27,26 @@ pip install -e .
 pip install -e ".[full]"
 ```
 
-#### Option 2: Install from PyPI (Production)
+#### Option 2: Install with Optional Features
 
 ```bash
-# Install basic version
-pip install sysagent-cli
+# Install with GUI support
+pip install -e ".[gui]"
 
-# Install with all optional features
-pip install sysagent-cli[full]
+# Install with vision features (screenshots, OCR)
+pip install -e ".[vision]"
+
+# Install with voice features (speech recognition, TTS)
+pip install -e ".[voice]"
+
+# Install with all features
+pip install -e ".[full]"
 
 # Install with development tools
-pip install sysagent-cli[dev]
+pip install -e ".[dev]"
 ```
 
-#### Option 3: Using pipx (Recommended for CLI tools)
-
-```bash
-# Install with pipx for isolated environment
-pipx install sysagent-cli
-
-# Or install with all features
-pipx install sysagent-cli[full]
-```
+> **Note**: This package is not yet published to PyPI. Install from source as shown in Option 1.
 
 ## Configuration
 

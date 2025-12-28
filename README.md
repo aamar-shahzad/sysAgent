@@ -20,12 +20,26 @@
 - **ProcessTool**: Process management and control
 - **NetworkTool**: Network diagnostics and connectivity
 - **AppTool**: Application launching and management
-- **SchedulerTool**: Task scheduling and automation
-- **ServiceTool**: System service management
+- **AutomationTool**: Task scheduling and automation
+- **SystemControlTool**: System service management
 - **ClipboardTool**: Clipboard operations
 - **AuthTool**: Secure credential management
 - **ScreenshotTool**: Screen capture and analysis
 - **VoiceTool**: Voice input/output capabilities
+- **SecurityTool**: Security scanning and management
+- **MonitoringTool**: System monitoring and alerts
+- **CodeGenerationTool**: Code generation and execution
+- **OSIntelligenceTool**: OS-specific optimizations
+- **LowLevelOSTool**: Low-level OS operations
+
+### 🖥️ GUI Features
+- **Chat Interface**: Natural language interaction with SysAgent in a beautiful GUI
+- **Settings GUI**: Configure API keys, model providers, and permissions
+- **System Dashboard**: Real-time system monitoring with graphs
+- **Process Manager**: Visual process management interface
+- **File Browser**: Graphical file operations
+- **Terminal View**: Execute shell commands directly
+- **Theme Support**: Dark/Light mode switching
 
 ### 🔒 Security & Safety
 - Permission-gated execution with OS-specific implementations
@@ -45,15 +59,24 @@
 ### Installation
 
 ```bash
-# Install from PyPI
-pip install sysagent-cli
+# Clone the repository
+git clone https://github.com/sysagent/sysagent-cli.git
+cd sysagent-cli
+
+# Install from local directory
+pip install -e .
 
 # Or install with all optional features
-pip install sysagent-cli[full]
+pip install -e ".[full]"
+
+# Install with GUI support
+pip install -e ".[gui]"
 
 # For development
-pip install sysagent-cli[dev]
+pip install -e ".[dev]"
 ```
+
+> **Note**: This package is not yet published to PyPI. Install from source as shown above.
 
 ### First Run
 
@@ -110,6 +133,54 @@ sysagent "optimize my startup programs"
 # Development workflows
 sysagent "set up my development environment"
 sysagent "monitor my project's resource usage"
+```
+
+### GUI Commands
+
+```bash
+# Launch the main GUI with chat interface
+sysagent gui
+
+# Open standalone chat window
+sysagent chat
+
+# Open settings to configure API keys
+sysagent settings
+
+# Open the system dashboard
+sysagent dashboard
+```
+
+### Plugin Management
+
+```bash
+# List available plugins
+sysagent plugins list --all
+
+# Create a new plugin template
+sysagent plugins create my_plugin
+
+# Load a plugin
+sysagent plugins load my_plugin
+
+# Unload a plugin
+sysagent plugins unload my_plugin
+```
+
+### Audit Logs
+
+```bash
+# View recent audit events
+sysagent logs show -n 50
+
+# Filter by event type
+sysagent logs show --type tool_execution
+
+# Export logs
+sysagent logs export -o audit_log.json --format json
+
+# Clean up old logs
+sysagent logs cleanup --days 30
 ```
 
 ## 🏗️ Architecture
