@@ -319,6 +319,12 @@ class MainWindow:
             ("🖥️", "Terminal", self._show_terminal, "terminal"),
         ])
         
+        # Utility section
+        self._create_nav_section(sidebar, "UTILITIES", [
+            ("📤", "Export", self._show_export_dialog, None),
+            ("❓", "Help", self._show_help, None),
+        ])
+        
         # Status panel at bottom
         self._create_status_panel(sidebar)
     
@@ -506,6 +512,9 @@ class MainWindow:
         )
         search_btn.pack(side="left")
         
+        # Quick stats bar (center)
+        self._create_quick_stats(inner)
+        
         # Right side actions
         right_frame = ctk.CTkFrame(inner, fg_color="transparent")
         right_frame.pack(side="right")
@@ -539,6 +548,20 @@ class MainWindow:
         )
         shortcuts_btn.pack(side="left", padx=2)
         
+        # Split view toggle
+        split_btn = ctk.CTkButton(
+            right_frame,
+            text="⊞",
+            width=36,
+            height=36,
+            corner_radius=8,
+            font=ctk.CTkFont(size=16),
+            fg_color="transparent",
+            hover_color=COLORS["bg_tertiary"],
+            command=self._toggle_split_view
+        )
+        split_btn.pack(side="left", padx=2)
+        
         # Quick actions
         actions = [
             ("📋", "Clipboard", self._show_clipboard),
@@ -559,6 +582,42 @@ class MainWindow:
                 command=cmd
             )
             btn.pack(side="left", padx=2)
+    
+    def _create_quick_stats(self, parent):
+        """Create quick stats bar in top bar."""
+        stats_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        stats_frame.pack(side="left", padx=30)
+        
+        if PSUTIL_AVAILABLE:
+            try:
+                import psutil
+                cpu = psutil.cpu_percent(interval=0.1)
+                mem = psutil.virtual_memory().percent
+                
+                # CPU stat
+                cpu_color = COLORS["success"] if cpu < 70 else COLORS["warning"] if cpu < 90 else COLORS["error"]
+                ctk.CTkLabel(
+                    stats_frame,
+                    text=f"CPU {cpu:.0f}%",
+                    font=ctk.CTkFont(size=11),
+                    text_color=cpu_color
+                ).pack(side="left", padx=8)
+                
+                # Memory stat
+                mem_color = COLORS["success"] if mem < 70 else COLORS["warning"] if mem < 90 else COLORS["error"]
+                ctk.CTkLabel(
+                    stats_frame,
+                    text=f"RAM {mem:.0f}%",
+                    font=ctk.CTkFont(size=11),
+                    text_color=mem_color
+                ).pack(side="left", padx=8)
+            except Exception:
+                pass
+    
+    def _toggle_split_view(self):
+        """Toggle split view mode."""
+        # For now, show a message - full implementation would require significant changes
+        self._show_toast("Split view coming soon!")
 
     def _setup_keyboard_shortcuts(self):
         """Setup keyboard shortcuts."""
@@ -1381,6 +1440,7 @@ class MainWindow:
                 ("Shift + Enter", "New line"),
                 ("↑ / ↓", "Navigate command history"),
                 ("⌘/Ctrl + L", "Clear chat"),
+                ("⌘/Ctrl + F", "Search in chat"),
             ]),
             ("Navigation", [
                 ("⌘/Ctrl + 1", "Go to Chat"),
@@ -1431,6 +1491,207 @@ class MainWindow:
         ctk.CTkButton(
             popup,
             text="Close",
+            width=100,
+            height=32,
+            corner_radius=6,
+            command=popup.destroy
+        ).pack(pady=16)
+    
+    def _show_export_dialog(self):
+        """Show export dialog for chat and data."""
+        if not USE_CUSTOMTKINTER:
+            return
+        
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("Export Data")
+        popup.geometry("400x350")
+        popup.transient(self.root)
+        popup.configure(fg_color=COLORS["bg"])
+        
+        # Header
+        ctk.CTkLabel(
+            popup,
+            text="📤 Export Data",
+            font=ctk.CTkFont(size=18, weight="bold")
+        ).pack(pady=20)
+        
+        # Export options
+        options_frame = ctk.CTkFrame(popup, fg_color="transparent")
+        options_frame.pack(fill="x", padx=20)
+        
+        export_options = [
+            ("💬 Chat History", "chat", "Export current chat as Markdown"),
+            ("📊 Session Data", "session", "Export all session data as JSON"),
+            ("⚙️ Settings", "settings", "Export configuration settings"),
+            ("📈 Analytics", "analytics", "Export usage statistics"),
+        ]
+        
+        selected_option = ctk.StringVar(value="chat")
+        
+        for label, value, description in export_options:
+            row = ctk.CTkFrame(options_frame, fg_color="transparent")
+            row.pack(fill="x", pady=4)
+            
+            ctk.CTkRadioButton(
+                row,
+                text=label,
+                variable=selected_option,
+                value=value,
+                font=ctk.CTkFont(size=13)
+            ).pack(side="left")
+            
+            ctk.CTkLabel(
+                row,
+                text=description,
+                font=ctk.CTkFont(size=10),
+                text_color=COLORS["text_muted"]
+            ).pack(side="left", padx=10)
+        
+        # Format selection
+        ctk.CTkLabel(
+            popup,
+            text="Format:",
+            font=ctk.CTkFont(size=12)
+        ).pack(anchor="w", padx=20, pady=(20, 5))
+        
+        format_var = ctk.StringVar(value="markdown")
+        format_frame = ctk.CTkFrame(popup, fg_color="transparent")
+        format_frame.pack(fill="x", padx=20)
+        
+        for fmt in ["markdown", "json", "txt"]:
+            ctk.CTkRadioButton(
+                format_frame,
+                text=fmt.upper(),
+                variable=format_var,
+                value=fmt,
+                font=ctk.CTkFont(size=12)
+            ).pack(side="left", padx=10)
+        
+        # Export button
+        def do_export():
+            option = selected_option.get()
+            fmt = format_var.get()
+            self._do_export(option, fmt)
+            popup.destroy()
+        
+        ctk.CTkButton(
+            popup,
+            text="Export",
+            width=120,
+            height=36,
+            corner_radius=8,
+            command=do_export
+        ).pack(pady=20)
+    
+    def _do_export(self, export_type: str, format: str):
+        """Perform the export."""
+        ext = {"markdown": ".md", "json": ".json", "txt": ".txt"}.get(format, ".txt")
+        
+        path = filedialog.asksaveasfilename(
+            defaultextension=ext,
+            filetypes=[
+                ("Markdown", "*.md"),
+                ("JSON", "*.json"),
+                ("Text", "*.txt"),
+                ("All Files", "*.*")
+            ]
+        )
+        
+        if not path:
+            return
+        
+        try:
+            content = ""
+            
+            if export_type == "chat" and self.chat_interface:
+                if format == "markdown":
+                    content = "# SysAgent Chat Export\n\n"
+                    for msg in self.chat_interface.messages:
+                        role = "You" if msg.msg_type.value == "user" else "SysAgent"
+                        content += f"## {role}\n{msg.content}\n\n"
+                elif format == "json":
+                    import json
+                    data = [{"role": msg.msg_type.value, "content": msg.content, "timestamp": str(msg.timestamp)} for msg in self.chat_interface.messages]
+                    content = json.dumps(data, indent=2)
+                else:
+                    for msg in self.chat_interface.messages:
+                        role = "You" if msg.msg_type.value == "user" else "SysAgent"
+                        content += f"[{role}]\n{msg.content}\n\n"
+            
+            elif export_type == "settings":
+                import json
+                content = json.dumps({"theme": self.current_theme, "mode": self.current_mode}, indent=2)
+            
+            with open(path, "w") as f:
+                f.write(content)
+            
+            self._show_toast(f"Exported to {Path(path).name}")
+        except Exception as e:
+            messagebox.showerror("Export Error", str(e))
+    
+    def _show_help(self):
+        """Show help dialog."""
+        if not USE_CUSTOMTKINTER:
+            return
+        
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("Help")
+        popup.geometry("500x450")
+        popup.transient(self.root)
+        popup.configure(fg_color=COLORS["bg"])
+        
+        # Header
+        header = ctk.CTkFrame(popup, fg_color=COLORS["bg_secondary"])
+        header.pack(fill="x")
+        ctk.CTkLabel(
+            header,
+            text="❓ Help & Tips",
+            font=ctk.CTkFont(size=18, weight="bold")
+        ).pack(pady=16)
+        
+        # Content
+        content = ctk.CTkScrollableFrame(popup, fg_color=COLORS["bg"])
+        content.pack(fill="both", expand=True, padx=16, pady=16)
+        
+        tips = [
+            ("💬 Chat", "Type natural language commands like 'show system status' or 'find large files'"),
+            ("⌘K Command Palette", "Press ⌘K (or Ctrl+K) for quick access to all commands"),
+            ("🎤 Voice Input", "Click the microphone button to use voice commands"),
+            ("📌 Pin Messages", "Right-click on any message to pin it for quick reference"),
+            ("🔍 Search Chat", "Click the search icon to find messages in your chat history"),
+            ("🌙 Theme Toggle", "Click the moon/sun icon to switch between dark and light modes"),
+            ("📋 Smart Clipboard", "Copy content and click the clipboard icon for smart actions"),
+            ("⚡ Suggestions", "The sidebar shows smart suggestions based on your usage patterns"),
+            ("📊 Dashboard", "View system stats and quick actions on the dashboard"),
+            ("⚙️ Settings", "Configure API keys, model, and preferences in settings"),
+        ]
+        
+        for title, description in tips:
+            tip_frame = ctk.CTkFrame(content, fg_color=COLORS["bg_secondary"], corner_radius=8)
+            tip_frame.pack(fill="x", pady=4)
+            
+            inner = ctk.CTkFrame(tip_frame, fg_color="transparent")
+            inner.pack(fill="x", padx=12, pady=10)
+            
+            ctk.CTkLabel(
+                inner,
+                text=title,
+                font=ctk.CTkFont(size=13, weight="bold"),
+                text_color=COLORS["accent"]
+            ).pack(anchor="w")
+            
+            ctk.CTkLabel(
+                inner,
+                text=description,
+                font=ctk.CTkFont(size=11),
+                text_color=COLORS["text_secondary"],
+                wraplength=420
+            ).pack(anchor="w", pady=(4, 0))
+        
+        # Close button
+        ctk.CTkButton(
+            popup,
+            text="Got it!",
             width=100,
             height=32,
             corner_radius=6,
@@ -1684,24 +1945,30 @@ class MainWindow:
         """Process with deep agent showing reasoning."""
         try:
             for update in self.deep_agent.process_with_reasoning(message):
+                # Check if chat interface still exists
+                if not self.chat_interface:
+                    break
+                
                 update_type = update.get('type', '')
                 
                 if update_type == 'reasoning':
                     step = update.get('step', '')
-                    self.root.after(0, lambda s=step: self.chat_interface.add_reasoning_step('analysis', s))
+                    if step:
+                        self.root.after(0, lambda s=step: self._safe_add_reasoning_step('analysis', s))
                 
                 elif update_type == 'analysis':
                     complexity = update.get('complexity', 0)
                     needs_planning = update.get('needs_planning', False)
                     if needs_planning:
-                        self.root.after(0, lambda: self.chat_interface.add_reasoning_step(
-                            'planning', f'Complex task detected (score: {complexity}), creating plan...'
+                        self.root.after(0, lambda c=complexity: self._safe_add_reasoning_step(
+                            'planning', f'Complex task detected (score: {c}), creating plan...'
                         ))
                 
                 elif update_type == 'plan':
                     steps = update.get('steps', [])
-                    self.root.after(0, lambda s=steps: self.chat_interface.add_reasoning_step(
-                        'planning', f'Plan created with {len(s)} steps'
+                    step_count = len(steps)
+                    self.root.after(0, lambda c=step_count: self._safe_add_reasoning_step(
+                        'planning', f'Plan created with {c} steps'
                     ))
                 
                 elif update_type == 'progress':
@@ -1709,16 +1976,16 @@ class MainWindow:
                     total = update.get('total', 1)
                     desc = update.get('description', '')
                     self.root.after(0, lambda s=step, t=total, d=desc: 
-                        self.chat_interface.update_reasoning_progress(s, t, d)
+                        self._safe_update_reasoning_progress(s, t, d)
                     )
                 
                 elif update_type == 'step_result':
                     success = update.get('success', False)
-                    result = update.get('result', '')
                     if not success:
                         error = update.get('error', '')
-                        self.root.after(0, lambda e=error: self.chat_interface.add_reasoning_step(
-                            'error_recovery', f'Step failed: {e[:50]}...'
+                        error_msg = error[:50] + '...' if len(error) > 50 else error
+                        self.root.after(0, lambda e=error_msg: self._safe_add_reasoning_step(
+                            'error_recovery', f'Step failed: {e}'
                         ))
                 
                 elif update_type == 'final':
@@ -1727,17 +1994,81 @@ class MainWindow:
                     duration = update.get('duration_ms', 0)
                     
                     # Hide reasoning panel and show response
-                    self.root.after(0, lambda: self.chat_interface._hide_reasoning())
-                    self.root.after(50, lambda r=response: self.chat_interface.add_message(r, is_user=False))
+                    self.root.after(0, lambda: self._safe_hide_reasoning())
+                    self.root.after(50, lambda r=response: self._safe_add_message(r))
                     
                     # Show quality indicator if enabled
                     if quality > 0:
                         self.root.after(100, lambda q=quality, d=duration: 
-                            self.chat_interface._toast(f"Quality: {q:.0f}% | {d}ms")
+                            self._safe_show_toast(f"Quality: {q:.0f}% | {d}ms")
                         )
         except Exception as e:
             # Fallback to simple processing
             self._process_simple(message)
+    
+    def _safe_add_reasoning_step(self, step_type: str, content: str):
+        """Safely add reasoning step with error handling."""
+        try:
+            if self.chat_interface:
+                self.chat_interface.add_reasoning_step(step_type, content)
+        except Exception:
+            pass
+    
+    def _safe_update_reasoning_progress(self, current: int, total: int, desc: str):
+        """Safely update reasoning progress with error handling."""
+        try:
+            if self.chat_interface:
+                self.chat_interface.update_reasoning_progress(current, total, desc)
+        except Exception:
+            pass
+    
+    def _safe_hide_reasoning(self):
+        """Safely hide reasoning panel."""
+        try:
+            if self.chat_interface:
+                self.chat_interface._hide_reasoning()
+        except Exception:
+            pass
+    
+    def _safe_add_message(self, message: str):
+        """Safely add message to chat."""
+        try:
+            if self.chat_interface:
+                self.chat_interface.add_message(message, is_user=False)
+        except Exception:
+            pass
+    
+    def _safe_show_toast(self, message: str):
+        """Safely show toast notification."""
+        try:
+            if self.chat_interface:
+                self.chat_interface._toast(message)
+        except Exception:
+            pass
+    
+    def _safe_show_loading(self, text: str = "Processing..."):
+        """Safely show loading bar."""
+        try:
+            if self.chat_interface:
+                self.chat_interface.show_loading_bar(text)
+        except Exception:
+            pass
+    
+    def _safe_hide_loading(self):
+        """Safely hide loading bar."""
+        try:
+            if self.chat_interface:
+                self.chat_interface.hide_loading_bar()
+        except Exception:
+            pass
+    
+    def _safe_update_loading(self, value: float, text: str = None):
+        """Safely update loading progress."""
+        try:
+            if self.chat_interface:
+                self.chat_interface.update_loading_progress(value, text)
+        except Exception:
+            pass
     
     def _process_with_streaming(self, message: str, start_time: float):
         """Process with streaming and human-in-the-loop support."""

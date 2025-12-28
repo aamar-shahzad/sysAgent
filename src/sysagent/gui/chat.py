@@ -2,7 +2,7 @@
 Smooth, Polished Chat Interface for SysAgent.
 Optimized for smoothness and responsiveness like CLI.
 Includes smart learning integration, favorites, and proactive suggestions.
-Now with search, context menus, drag & drop, and better animations.
+Now with search, context menus, drag & drop, voice input, and better animations.
 """
 
 import tkinter as tk
@@ -12,9 +12,10 @@ import queue
 import re
 import time
 import os
+import subprocess
 from typing import Optional, Callable, List, Dict, Any, Tuple
 from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
@@ -23,6 +24,13 @@ try:
     CTK_AVAILABLE = True
 except ImportError:
     CTK_AVAILABLE = False
+
+# Check for voice support
+try:
+    import speech_recognition as sr
+    VOICE_AVAILABLE = True
+except ImportError:
+    VOICE_AVAILABLE = False
 
 # Import smart features
 try:
@@ -101,6 +109,96 @@ class SmoothLabel(ctk.CTkLabel if CTK_AVAILABLE else object):
             self.configure(text=text)
         except Exception:
             pass
+
+
+class LoadingBar:
+    """Animated loading bar."""
+    
+    def __init__(self, parent, colors: dict, text: str = "Loading..."):
+        self.parent = parent
+        self.colors = colors
+        self.text = text
+        self.frame = None
+        self.progress_var = 0.0
+        self.is_active = False
+        
+        self._create_ui()
+    
+    def _create_ui(self):
+        """Create loading bar UI."""
+        if not CTK_AVAILABLE:
+            return
+        
+        self.frame = ctk.CTkFrame(
+            self.parent,
+            fg_color=self.colors["bg_secondary"],
+            corner_radius=8
+        )
+        
+        inner = ctk.CTkFrame(self.frame, fg_color="transparent")
+        inner.pack(fill="x", padx=12, pady=8)
+        
+        self.label = ctk.CTkLabel(
+            inner,
+            text=self.text,
+            font=ctk.CTkFont(size=11),
+            text_color=self.colors["text_secondary"]
+        )
+        self.label.pack(anchor="w")
+        
+        self.progress_bar = ctk.CTkProgressBar(
+            inner,
+            width=300,
+            height=6,
+            corner_radius=3,
+            fg_color=self.colors.get("bg_tertiary", "#22222e"),
+            progress_color=self.colors["accent"]
+        )
+        self.progress_bar.set(0)
+        self.progress_bar.pack(anchor="w", pady=(4, 0))
+    
+    def start(self, mode: str = "indeterminate"):
+        """Start the loading animation."""
+        self.is_active = True
+        if mode == "indeterminate":
+            self._animate_indeterminate()
+    
+    def _animate_indeterminate(self):
+        """Animate indeterminate progress."""
+        if not self.is_active or not self.frame:
+            return
+        
+        try:
+            if not self.frame.winfo_exists():
+                return
+            
+            self.progress_var = (self.progress_var + 0.02) % 1.0
+            self.progress_bar.set(self.progress_var)
+            self.frame.after(50, self._animate_indeterminate)
+        except Exception:
+            pass
+    
+    def set_progress(self, value: float, text: str = None):
+        """Set specific progress value."""
+        if self.progress_bar:
+            self.progress_bar.set(min(1.0, max(0.0, value)))
+        if text and self.label:
+            self.label.configure(text=text)
+    
+    def stop(self):
+        """Stop and hide the loading bar."""
+        self.is_active = False
+        if self.frame:
+            try:
+                self.frame.destroy()
+            except Exception:
+                pass
+        self.frame = None
+    
+    def pack(self, **kwargs):
+        """Pack the loading bar."""
+        if self.frame:
+            self.frame.pack(**kwargs)
 
 
 class TypingIndicator:
@@ -200,41 +298,64 @@ class ReasoningPanel:
         self.frame = None
         self.steps_frame = None
         self.is_visible = False
+        self._destroyed = False
+    
+    def _widget_exists(self, widget) -> bool:
+        """Check if a widget exists and is valid."""
+        if widget is None:
+            return False
+        try:
+            return widget.winfo_exists()
+        except Exception:
+            return False
     
     def show(self):
         """Show reasoning panel."""
         if not CTK_AVAILABLE or self.is_visible:
             return
         
+        # Check parent exists
+        if not self._widget_exists(self.parent):
+            return
+        
         self.is_visible = True
+        self._destroyed = False
         
-        self.frame = ctk.CTkFrame(
-            self.parent,
-            fg_color=self.colors["bg_secondary"],
-            corner_radius=10,
-            border_width=1,
-            border_color=self.colors["accent"]
-        )
-        self.frame.pack(fill="x", padx=16, pady=8)
-        
-        # Header
-        header = ctk.CTkFrame(self.frame, fg_color="transparent")
-        header.pack(fill="x", padx=12, pady=(10, 5))
-        
-        ctk.CTkLabel(
-            header,
-            text="🧠 Agent Reasoning",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=self.colors["accent"]
-        ).pack(side="left")
-        
-        # Steps container
-        self.steps_frame = ctk.CTkFrame(self.frame, fg_color="transparent")
-        self.steps_frame.pack(fill="x", padx=12, pady=(0, 10))
+        try:
+            self.frame = ctk.CTkFrame(
+                self.parent,
+                fg_color=self.colors["bg_secondary"],
+                corner_radius=10,
+                border_width=1,
+                border_color=self.colors["accent"]
+            )
+            self.frame.pack(fill="x", padx=16, pady=8)
+            
+            # Header
+            header = ctk.CTkFrame(self.frame, fg_color="transparent")
+            header.pack(fill="x", padx=12, pady=(10, 5))
+            
+            ctk.CTkLabel(
+                header,
+                text="🧠 Agent Reasoning",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                text_color=self.colors["accent"]
+            ).pack(side="left")
+            
+            # Steps container
+            self.steps_frame = ctk.CTkFrame(self.frame, fg_color="transparent")
+            self.steps_frame.pack(fill="x", padx=12, pady=(0, 10))
+        except Exception:
+            self.is_visible = False
+            self.frame = None
+            self.steps_frame = None
     
     def add_step(self, step_type: str, content: str):
         """Add a reasoning step."""
-        if not self.steps_frame or not CTK_AVAILABLE:
+        if self._destroyed or not CTK_AVAILABLE:
+            return
+        
+        if not self._widget_exists(self.steps_frame):
             return
         
         icons = {
@@ -248,43 +369,55 @@ class ReasoningPanel:
         
         icon = icons.get(step_type, "•")
         
-        step_frame = ctk.CTkFrame(self.steps_frame, fg_color="transparent")
-        step_frame.pack(fill="x", anchor="w", pady=2)
-        
-        ctk.CTkLabel(
-            step_frame,
-            text=f"{icon} {content}",
-            font=ctk.CTkFont(size=11),
-            text_color=self.colors["text_secondary"],
-            anchor="w"
-        ).pack(side="left")
+        try:
+            step_frame = ctk.CTkFrame(self.steps_frame, fg_color="transparent")
+            step_frame.pack(fill="x", anchor="w", pady=2)
+            
+            ctk.CTkLabel(
+                step_frame,
+                text=f"{icon} {content}",
+                font=ctk.CTkFont(size=11),
+                text_color=self.colors["text_secondary"],
+                anchor="w"
+            ).pack(side="left")
+        except Exception:
+            # Widget was destroyed during operation
+            self._destroyed = True
     
     def set_progress(self, current: int, total: int, description: str):
         """Show progress bar."""
-        if not self.steps_frame or not CTK_AVAILABLE:
+        if self._destroyed or not CTK_AVAILABLE:
             return
         
-        # Clear and add progress
-        for w in self.steps_frame.winfo_children():
-            w.destroy()
+        if not self._widget_exists(self.steps_frame):
+            return
         
-        progress_frame = ctk.CTkFrame(self.steps_frame, fg_color="transparent")
-        progress_frame.pack(fill="x", pady=5)
-        
-        ctk.CTkLabel(
-            progress_frame,
-            text=f"Step {current}/{total}: {description[:40]}...",
-            font=ctk.CTkFont(size=11),
-            text_color=self.colors["text"]
-        ).pack(anchor="w")
-        
-        bar = ctk.CTkProgressBar(progress_frame, width=300, height=8)
-        bar.set(current / total if total > 0 else 0)
-        bar.pack(anchor="w", pady=(5, 0))
+        try:
+            # Clear and add progress
+            for w in self.steps_frame.winfo_children():
+                w.destroy()
+            
+            progress_frame = ctk.CTkFrame(self.steps_frame, fg_color="transparent")
+            progress_frame.pack(fill="x", pady=5)
+            
+            desc_text = description[:40] + "..." if len(description) > 40 else description
+            ctk.CTkLabel(
+                progress_frame,
+                text=f"Step {current}/{total}: {desc_text}",
+                font=ctk.CTkFont(size=11),
+                text_color=self.colors["text"]
+            ).pack(anchor="w")
+            
+            bar = ctk.CTkProgressBar(progress_frame, width=300, height=8)
+            bar.set(current / total if total > 0 else 0)
+            bar.pack(anchor="w", pady=(5, 0))
+        except Exception:
+            self._destroyed = True
     
     def hide(self):
         """Hide reasoning panel."""
         self.is_visible = False
+        self._destroyed = True
         if self.frame:
             try:
                 self.frame.destroy()
@@ -292,6 +425,353 @@ class ReasoningPanel:
                 pass
         self.frame = None
         self.steps_frame = None
+
+
+class VoiceInputButton:
+    """Voice input button with recording indicator."""
+    
+    def __init__(self, parent, colors: dict, on_transcription: Callable[[str], None]):
+        self.parent = parent
+        self.colors = colors
+        self.on_transcription = on_transcription
+        self.is_recording = False
+        self.recognizer = None
+        self.microphone = None
+        
+        if VOICE_AVAILABLE:
+            try:
+                self.recognizer = sr.Recognizer()
+            except Exception:
+                pass
+        
+        self._create_button()
+    
+    def _create_button(self):
+        """Create the voice input button."""
+        if not CTK_AVAILABLE:
+            return
+        
+        self.button = ctk.CTkButton(
+            self.parent,
+            text="🎤",
+            width=36,
+            height=36,
+            corner_radius=6,
+            font=ctk.CTkFont(size=14),
+            fg_color="transparent",
+            hover_color=self.colors["bg_hover"] if "bg_hover" in self.colors else self.colors.get("bg_secondary", "#1a1a24"),
+            text_color=self.colors["text_muted"] if VOICE_AVAILABLE else self.colors.get("border", "#2a2a35"),
+            command=self._toggle_recording
+        )
+    
+    def _toggle_recording(self):
+        """Toggle voice recording."""
+        if not VOICE_AVAILABLE or not self.recognizer:
+            return
+        
+        if self.is_recording:
+            self._stop_recording()
+        else:
+            self._start_recording()
+    
+    def _start_recording(self):
+        """Start voice recording."""
+        self.is_recording = True
+        self.button.configure(
+            text="🔴",
+            fg_color=self.colors.get("error", "#ef4444"),
+            text_color="white"
+        )
+        
+        # Start recording in background
+        thread = threading.Thread(target=self._record_audio, daemon=True)
+        thread.start()
+    
+    def _stop_recording(self):
+        """Stop voice recording."""
+        self.is_recording = False
+        self.button.configure(
+            text="🎤",
+            fg_color="transparent",
+            text_color=self.colors["text_muted"]
+        )
+    
+    def _record_audio(self):
+        """Record and transcribe audio."""
+        try:
+            with sr.Microphone() as source:
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.3)
+                audio = self.recognizer.listen(source, timeout=10, phrase_time_limit=30)
+            
+            # Transcribe
+            try:
+                text = self.recognizer.recognize_google(audio)
+                if text and self.on_transcription:
+                    # Schedule on main thread
+                    self.parent.after(0, lambda t=text: self.on_transcription(t))
+            except sr.UnknownValueError:
+                pass
+            except sr.RequestError:
+                pass
+        except Exception:
+            pass
+        finally:
+            # Reset button on main thread
+            self.parent.after(0, self._stop_recording)
+    
+    def pack(self, **kwargs):
+        """Pack the button."""
+        if hasattr(self, 'button'):
+            self.button.pack(**kwargs)
+
+
+class MessageReactions:
+    """Reactions bar for messages."""
+    
+    REACTIONS = [
+        ("👍", "helpful"),
+        ("👎", "not_helpful"),
+        ("💡", "insightful"),
+        ("🔧", "needs_fix"),
+        ("⭐", "favorite"),
+    ]
+    
+    def __init__(self, parent, colors: dict, on_react: Callable[[str], None]):
+        self.parent = parent
+        self.colors = colors
+        self.on_react = on_react
+        self.frame = None
+        self.reactions_count: Dict[str, int] = {}
+        
+        self._create_ui()
+    
+    def _create_ui(self):
+        """Create reactions bar."""
+        if not CTK_AVAILABLE:
+            return
+        
+        self.frame = ctk.CTkFrame(self.parent, fg_color="transparent")
+        
+        for emoji, reaction_type in self.REACTIONS:
+            btn = ctk.CTkButton(
+                self.frame,
+                text=emoji,
+                width=28,
+                height=24,
+                corner_radius=4,
+                font=ctk.CTkFont(size=12),
+                fg_color="transparent",
+                hover_color=self.colors.get("bg_hover", self.colors["bg_secondary"]),
+                command=lambda r=reaction_type, e=emoji: self._on_react(r, e)
+            )
+            btn.pack(side="left", padx=1)
+    
+    def _on_react(self, reaction_type: str, emoji: str):
+        """Handle reaction click."""
+        self.reactions_count[reaction_type] = self.reactions_count.get(reaction_type, 0) + 1
+        if self.on_react:
+            self.on_react(reaction_type)
+    
+    def pack(self, **kwargs):
+        """Pack the reactions bar."""
+        if self.frame:
+            self.frame.pack(**kwargs)
+
+
+class ErrorDisplay:
+    """Better error message display."""
+    
+    def __init__(self, parent, colors: dict, error_message: str, 
+                 on_retry: Optional[Callable] = None,
+                 on_copy: Optional[Callable[[str], None]] = None):
+        self.parent = parent
+        self.colors = colors
+        self.error_message = error_message
+        self.on_retry = on_retry
+        self.on_copy = on_copy
+        
+        self._create_ui()
+    
+    def _create_ui(self):
+        """Create error display UI."""
+        if not CTK_AVAILABLE:
+            return
+        
+        self.frame = ctk.CTkFrame(
+            self.parent,
+            fg_color=self.colors.get("error_bg", "#2d1618"),
+            corner_radius=8,
+            border_width=1,
+            border_color=self.colors.get("error", "#ef4444")
+        )
+        self.frame.pack(fill="x", pady=4)
+        
+        inner = ctk.CTkFrame(self.frame, fg_color="transparent")
+        inner.pack(fill="x", padx=12, pady=10)
+        
+        # Header
+        header = ctk.CTkFrame(inner, fg_color="transparent")
+        header.pack(fill="x")
+        
+        ctk.CTkLabel(
+            header,
+            text="⚠️ Error",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=self.colors.get("error", "#ef4444")
+        ).pack(side="left")
+        
+        # Collapse/expand button
+        self.expanded = False
+        self.expand_btn = ctk.CTkButton(
+            header,
+            text="▼",
+            width=24,
+            height=24,
+            corner_radius=4,
+            font=ctk.CTkFont(size=10),
+            fg_color="transparent",
+            hover_color=self.colors.get("bg_hover", self.colors["bg_secondary"]),
+            command=self._toggle_expand
+        )
+        self.expand_btn.pack(side="right")
+        
+        # Error message (collapsed view)
+        preview = self.error_message[:100] + "..." if len(self.error_message) > 100 else self.error_message
+        self.preview_label = ctk.CTkLabel(
+            inner,
+            text=preview,
+            font=ctk.CTkFont(size=12),
+            text_color=self.colors["text_secondary"],
+            wraplength=450,
+            anchor="w"
+        )
+        self.preview_label.pack(anchor="w", pady=(8, 0))
+        
+        # Full error (hidden by default)
+        self.full_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        
+        ctk.CTkLabel(
+            self.full_frame,
+            text=self.error_message,
+            font=ctk.CTkFont(size=11, family="Consolas"),
+            text_color=self.colors["text"],
+            wraplength=450,
+            anchor="w",
+            justify="left"
+        ).pack(anchor="w")
+        
+        # Action buttons
+        actions = ctk.CTkFrame(inner, fg_color="transparent")
+        actions.pack(fill="x", pady=(10, 0))
+        
+        if self.on_retry:
+            ctk.CTkButton(
+                actions,
+                text="🔄 Retry",
+                width=80,
+                height=28,
+                corner_radius=6,
+                font=ctk.CTkFont(size=11),
+                fg_color=self.colors.get("accent", "#6366f1"),
+                command=self.on_retry
+            ).pack(side="left", padx=(0, 8))
+        
+        if self.on_copy:
+            ctk.CTkButton(
+                actions,
+                text="📋 Copy Error",
+                width=100,
+                height=28,
+                corner_radius=6,
+                font=ctk.CTkFont(size=11),
+                fg_color="transparent",
+                border_width=1,
+                border_color=self.colors["border"],
+                hover_color=self.colors.get("bg_hover", self.colors["bg_secondary"]),
+                command=lambda: self.on_copy(self.error_message)
+            ).pack(side="left")
+    
+    def _toggle_expand(self):
+        """Toggle error message expansion."""
+        self.expanded = not self.expanded
+        
+        if self.expanded:
+            self.preview_label.pack_forget()
+            self.full_frame.pack(anchor="w", pady=(8, 0))
+            self.expand_btn.configure(text="▲")
+        else:
+            self.full_frame.pack_forget()
+            self.preview_label.pack(anchor="w", pady=(8, 0))
+            self.expand_btn.configure(text="▼")
+
+
+class PinnedMessage:
+    """A pinned message at the top of chat."""
+    
+    def __init__(self, parent, colors: dict, message: str, on_unpin: Callable):
+        self.parent = parent
+        self.colors = colors
+        self.message = message
+        self.on_unpin = on_unpin
+        self.frame = None
+        
+        self._create_ui()
+    
+    def _create_ui(self):
+        """Create the pinned message UI."""
+        if not CTK_AVAILABLE:
+            return
+        
+        self.frame = ctk.CTkFrame(
+            self.parent,
+            fg_color=self.colors.get("bg_tertiary", "#1a1a24"),
+            corner_radius=8,
+            height=40
+        )
+        self.frame.pack(fill="x", padx=16, pady=(8, 0))
+        self.frame.pack_propagate(False)
+        
+        inner = ctk.CTkFrame(self.frame, fg_color="transparent")
+        inner.pack(fill="x", padx=12, pady=8)
+        
+        # Pin icon
+        ctk.CTkLabel(
+            inner,
+            text="📌",
+            font=ctk.CTkFont(size=12)
+        ).pack(side="left")
+        
+        # Message preview
+        preview = self.message[:60] + "..." if len(self.message) > 60 else self.message
+        ctk.CTkLabel(
+            inner,
+            text=preview,
+            font=ctk.CTkFont(size=12),
+            text_color=self.colors["text_secondary"]
+        ).pack(side="left", padx=8)
+        
+        # Unpin button
+        ctk.CTkButton(
+            inner,
+            text="✕",
+            width=20,
+            height=20,
+            corner_radius=10,
+            font=ctk.CTkFont(size=10),
+            fg_color="transparent",
+            hover_color=self.colors.get("bg_hover", "#22222e"),
+            command=self._unpin
+        ).pack(side="right")
+    
+    def _unpin(self):
+        """Unpin the message."""
+        if self.frame:
+            try:
+                self.frame.destroy()
+            except Exception:
+                pass
+        if self.on_unpin:
+            self.on_unpin()
 
 
 class ApprovalDialog:
@@ -533,7 +1013,7 @@ class ChatInterface:
         self.on_send = on_send
         self.on_file_drop = on_file_drop
         self.messages: List[ChatMessage] = []
-        self.message_widgets: List[Tuple[ctk.CTkFrame, ChatMessage]] = []  # Track message widgets
+        self.message_widgets: List[Tuple[Any, ChatMessage]] = []  # Track message widgets
         self.message_queue = queue.Queue()
         self.is_processing = False
         self.last_query = ""
@@ -544,12 +1024,15 @@ class ChatInterface:
         self.typing_indicator: Optional[TypingIndicator] = None
         self.tool_indicator: Optional[ToolIndicator] = None
         self.reasoning_panel: Optional[ReasoningPanel] = None
+        self.loading_bar: Optional[LoadingBar] = None
         self.stream_data: Optional[Dict] = None
         self.show_reasoning = True  # Toggle for showing reasoning
         self.search_mode = False
         self.search_query = ""
         self.search_results: List[int] = []
         self.current_search_index = 0
+        self.pinned_messages: List[PinnedMessage] = []
+        self.voice_button: Optional[VoiceInputButton] = None
         
         self._create_ui()
         self._start_queue_processor()
@@ -850,10 +1333,18 @@ class ChatInterface:
             corner_radius=6,
             font=ctk.CTkFont(size=14),
             fg_color="transparent",
-            hover_color=self.colors["bg_hover"],
+            hover_color=self.colors.get("bg_hover", self.colors["bg_secondary"]),
             command=self._browse_files
         )
         attach_btn.pack(side="left", padx=4)
+        
+        # Voice input button
+        self.voice_button = VoiceInputButton(
+            input_inner,
+            self.colors,
+            on_transcription=self._on_voice_transcription
+        )
+        self.voice_button.pack(side="left", padx=2)
         
         # Text input
         self.input_field = ctk.CTkTextbox(
@@ -1301,10 +1792,24 @@ class ChatInterface:
             self.typing_indicator.hide()
             self.typing_indicator = None
     
+    def _widget_exists(self, widget) -> bool:
+        """Check if a widget exists and is valid."""
+        if widget is None:
+            return False
+        try:
+            return widget.winfo_exists()
+        except Exception:
+            return False
+    
     def _show_reasoning(self):
         """Show reasoning panel."""
-        if not self.show_reasoning:
+        if not self.show_reasoning or not CTK_AVAILABLE:
             return
+        
+        # Check if messages frame exists
+        if not self._widget_exists(self.messages_frame):
+            return
+        
         self._hide_reasoning()
         self.reasoning_panel = ReasoningPanel(self.messages_frame, self.colors)
         self.reasoning_panel.show()
@@ -1313,22 +1818,66 @@ class ChatInterface:
     def _hide_reasoning(self):
         """Hide reasoning panel."""
         if self.reasoning_panel:
-            self.reasoning_panel.hide()
+            try:
+                self.reasoning_panel.hide()
+            except Exception:
+                pass
             self.reasoning_panel = None
+    
+    def show_loading_bar(self, text: str = "Processing..."):
+        """Show loading bar with animation."""
+        if not CTK_AVAILABLE or not self._widget_exists(self.messages_frame):
+            return
+        
+        self.hide_loading_bar()
+        self.loading_bar = LoadingBar(self.messages_frame, self.colors, text)
+        self.loading_bar.pack(fill="x", padx=16, pady=8)
+        self.loading_bar.start()
+        self._scroll_to_bottom()
+    
+    def hide_loading_bar(self):
+        """Hide loading bar."""
+        if self.loading_bar:
+            try:
+                self.loading_bar.stop()
+            except Exception:
+                pass
+            self.loading_bar = None
+    
+    def update_loading_progress(self, value: float, text: str = None):
+        """Update loading bar progress."""
+        if self.loading_bar:
+            self.loading_bar.set_progress(value, text)
     
     def add_reasoning_step(self, step_type: str, content: str):
         """Add a reasoning step to the panel."""
-        if not self.reasoning_panel:
+        if not CTK_AVAILABLE:
+            return
+        
+        # Check if messages frame still exists
+        if not self._widget_exists(self.messages_frame):
+            return
+        
+        if not self.reasoning_panel or self.reasoning_panel._destroyed:
             self._show_reasoning()
-        if self.reasoning_panel:
+        
+        if self.reasoning_panel and not self.reasoning_panel._destroyed:
             self.reasoning_panel.add_step(step_type, content)
             self._scroll_to_bottom()
     
     def update_reasoning_progress(self, current: int, total: int, description: str):
         """Update reasoning progress."""
-        if not self.reasoning_panel:
+        if not CTK_AVAILABLE:
+            return
+        
+        # Check if messages frame still exists
+        if not self._widget_exists(self.messages_frame):
+            return
+        
+        if not self.reasoning_panel or self.reasoning_panel._destroyed:
             self._show_reasoning()
-        if self.reasoning_panel:
+        
+        if self.reasoning_panel and not self.reasoning_panel._destroyed:
             self.reasoning_panel.set_progress(current, total, description)
             self._scroll_to_bottom()
     
@@ -1404,38 +1953,48 @@ class ChatInterface:
         content_frame = ctk.CTkFrame(row, fg_color="transparent")
         content_frame.pack(side="left", fill="x", expand=True)
         
-        # Render markdown
-        self._render_markdown(content_frame, message.content)
+        # Render markdown with enhanced formatting
+        self._render_enhanced_markdown(content_frame, message.content)
         
-        # Actions
+        # Actions bar
         actions = ctk.CTkFrame(content_frame, fg_color="transparent")
-        actions.pack(anchor="w", pady=(6, 0))
+        actions.pack(anchor="w", pady=(8, 0))
         
-        for icon, cmd in [("📋", lambda: self._copy(message.content)), ("🔄", self._retry)]:
+        # Action buttons with better styling
+        action_buttons = [
+            ("📋", "Copy", lambda: self._copy(message.content)),
+            ("🔄", "Retry", self._retry),
+            ("📌", "Pin", lambda: self.pin_message(message)),
+        ]
+        
+        for icon, tooltip, cmd in action_buttons:
             btn = ctk.CTkButton(
                 actions,
                 text=icon,
-                width=26,
-                height=24,
+                width=28,
+                height=26,
                 corner_radius=4,
+                font=ctk.CTkFont(size=12),
                 fg_color="transparent",
-                hover_color=self.colors["bg_hover"],
+                hover_color=self.colors.get("bg_hover", self.colors["bg_secondary"]),
                 command=cmd
             )
             btn.pack(side="left", padx=2)
         
-        # Feedback buttons
-        ctk.CTkLabel(actions, text="  ", width=20).pack(side="left")
+        # Separator
+        ctk.CTkLabel(actions, text="│", text_color=self.colors["border"], width=15).pack(side="left")
         
-        for rating, icon in [(5, "👍"), (1, "👎")]:
+        # Feedback buttons
+        for rating, icon, color in [(5, "👍", self.colors["success"]), (1, "👎", self.colors["error"])]:
             btn = ctk.CTkButton(
                 actions,
                 text=icon,
-                width=26,
-                height=24,
+                width=28,
+                height=26,
                 corner_radius=4,
+                font=ctk.CTkFont(size=12),
                 fg_color="transparent",
-                hover_color=self.colors["bg_hover"],
+                hover_color=color,
                 command=lambda r=rating, c=message.content: self._record_feedback(r, c)
             )
             btn.pack(side="left", padx=1)
@@ -1516,23 +2075,14 @@ class ChatInterface:
                 i += 2
     
     def _render_error(self, container, message: ChatMessage):
-        """Render error message."""
-        bubble = ctk.CTkFrame(
+        """Render error message with enhanced display."""
+        error_display = ErrorDisplay(
             container,
-            fg_color=self.colors["bg_secondary"],
-            corner_radius=10,
-            border_width=1,
-            border_color=self.colors["error"]
+            self.colors,
+            message.content,
+            on_retry=self._retry,
+            on_copy=self._copy
         )
-        bubble.pack(anchor="w", padx=32)
-        
-        ctk.CTkLabel(
-            bubble,
-            text=f"⚠️ {message.content}",
-            font=ctk.CTkFont(size=13),
-            text_color=self.colors["error"],
-            wraplength=450
-        ).pack(padx=14, pady=10)
     
     def _render_system(self, container, message: ChatMessage):
         """Render system message."""
@@ -2146,6 +2696,7 @@ Just type a message below to get started!"""
                       activebackground=self.colors["accent"])
         
         menu.add_command(label="📋 Copy", command=lambda: self._copy(message.content))
+        menu.add_command(label="📌 Pin message", command=lambda: self.pin_message(message))
         menu.add_separator()
         
         if message.msg_type == MessageType.ASSISTANT:
@@ -2161,11 +2712,18 @@ Just type a message below to get started!"""
         
         menu.add_separator()
         menu.add_command(label="🔍 Search similar", command=lambda: self._search_similar(message.content))
+        menu.add_command(label="📤 Share", command=lambda: self._share_message(message))
         
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+    
+    def _share_message(self, message: ChatMessage):
+        """Share a message (copy formatted)."""
+        formatted = f"[SysAgent]\n{message.content}"
+        self._copy(formatted)
+        self._toast("Copied to share!")
     
     def _save_as_snippet(self, content: str):
         """Save content as snippet."""
@@ -2211,6 +2769,228 @@ Just type a message below to get started!"""
         self.search_entry.delete(0, "end")
         self.search_entry.insert(0, query)
         self._do_search()
+    
+    # ==================== VOICE INPUT ====================
+    
+    def _on_voice_transcription(self, text: str):
+        """Handle voice transcription result."""
+        if text:
+            self._set_input_text(text)
+            # Optionally auto-send
+            # self._send()
+    
+    # ==================== PINNED MESSAGES ====================
+    
+    def pin_message(self, message: ChatMessage):
+        """Pin a message to the top of chat."""
+        if not CTK_AVAILABLE:
+            return
+        
+        def on_unpin():
+            self.pinned_messages = [p for p in self.pinned_messages if p.message != message.content]
+        
+        pinned = PinnedMessage(
+            self.frame,
+            self.colors,
+            message.content,
+            on_unpin
+        )
+        self.pinned_messages.append(pinned)
+    
+    def unpin_all_messages(self):
+        """Unpin all messages."""
+        for pinned in self.pinned_messages:
+            if pinned.frame:
+                try:
+                    pinned.frame.destroy()
+                except Exception:
+                    pass
+        self.pinned_messages.clear()
+    
+    # ==================== ENHANCED MARKDOWN ====================
+    
+    def _render_enhanced_markdown(self, parent, content: str):
+        """Render markdown with better formatting and syntax highlighting."""
+        if not CTK_AVAILABLE:
+            return
+        
+        # Split by code blocks
+        code_pattern = r'```(\w*)\n?([\s\S]*?)```'
+        
+        # Find all code blocks and their positions
+        parts = []
+        last_end = 0
+        
+        for match in re.finditer(code_pattern, content):
+            # Add text before code block
+            if match.start() > last_end:
+                parts.append(('text', content[last_end:match.start()]))
+            
+            # Add code block
+            lang = match.group(1) or 'text'
+            code = match.group(2).strip()
+            parts.append(('code', (lang, code)))
+            
+            last_end = match.end()
+        
+        # Add remaining text
+        if last_end < len(content):
+            parts.append(('text', content[last_end:]))
+        
+        # Render each part
+        for part_type, part_content in parts:
+            if part_type == 'text':
+                self._render_text_block(parent, part_content)
+            elif part_type == 'code':
+                lang, code = part_content
+                self._render_code_block(parent, code, lang)
+    
+    def _render_text_block(self, parent, text: str):
+        """Render a text block with markdown formatting."""
+        text = text.strip()
+        if not text:
+            return
+        
+        # Handle headers
+        lines = text.split('\n')
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Check for headers
+            if line.startswith('### '):
+                self._render_header(parent, line[4:], 3)
+            elif line.startswith('## '):
+                self._render_header(parent, line[3:], 2)
+            elif line.startswith('# '):
+                self._render_header(parent, line[2:], 1)
+            elif line.startswith('- ') or line.startswith('* '):
+                self._render_list_item(parent, line[2:])
+            elif re.match(r'^\d+\.\s', line):
+                self._render_list_item(parent, line, numbered=True)
+            else:
+                # Regular text with inline formatting
+                self._render_inline_text(parent, line)
+    
+    def _render_header(self, parent, text: str, level: int):
+        """Render a header."""
+        sizes = {1: 18, 2: 16, 3: 14}
+        size = sizes.get(level, 14)
+        
+        ctk.CTkLabel(
+            parent,
+            text=text,
+            font=ctk.CTkFont(size=size, weight="bold"),
+            text_color=self.colors["text"],
+            anchor="w"
+        ).pack(anchor="w", pady=(8, 4))
+    
+    def _render_list_item(self, parent, text: str, numbered: bool = False):
+        """Render a list item."""
+        bullet = "•" if not numbered else ""
+        
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.pack(anchor="w", fill="x")
+        
+        ctk.CTkLabel(
+            frame,
+            text=f"  {bullet}",
+            font=ctk.CTkFont(size=14),
+            text_color=self.colors["accent"]
+        ).pack(side="left")
+        
+        self._render_inline_text(frame, text, pack_side="left")
+    
+    def _render_inline_text(self, parent, text: str, pack_side: str = None):
+        """Render text with inline formatting (bold, italic, code)."""
+        # Clean up markdown
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # Bold
+        text = re.sub(r'\*(.+?)\*', r'\1', text)      # Italic
+        text = re.sub(r'`(.+?)`', r'[\1]', text)      # Inline code
+        
+        label = ctk.CTkLabel(
+            parent,
+            text=text,
+            font=ctk.CTkFont(size=14),
+            text_color=self.colors["text"],
+            wraplength=500,
+            justify="left",
+            anchor="w"
+        )
+        
+        if pack_side:
+            label.pack(side=pack_side, padx=4)
+        else:
+            label.pack(anchor="w", pady=2)
+    
+    def _render_code_block(self, parent, code: str, language: str = ""):
+        """Render a code block with syntax highlighting."""
+        code_frame = ctk.CTkFrame(
+            parent,
+            fg_color=self.colors["code_bg"],
+            corner_radius=8
+        )
+        code_frame.pack(fill="x", pady=6)
+        
+        # Header with language and copy button
+        header = ctk.CTkFrame(code_frame, fg_color="transparent")
+        header.pack(fill="x", padx=10, pady=(8, 0))
+        
+        if language:
+            ctk.CTkLabel(
+                header,
+                text=language.upper(),
+                font=ctk.CTkFont(size=10, weight="bold"),
+                text_color=self.colors["accent"]
+            ).pack(side="left")
+        
+        ctk.CTkButton(
+            header,
+            text="📋 Copy",
+            width=60,
+            height=22,
+            corner_radius=4,
+            font=ctk.CTkFont(size=10),
+            fg_color=self.colors.get("bg_hover", self.colors["bg_secondary"]),
+            hover_color=self.colors["border"],
+            command=lambda c=code: self._copy(c)
+        ).pack(side="right")
+        
+        # Code content with line numbers
+        code_content = ctk.CTkFrame(code_frame, fg_color="transparent")
+        code_content.pack(fill="x", padx=10, pady=(4, 10))
+        
+        lines = code.split('\n')
+        for i, line in enumerate(lines[:50], 1):  # Limit to 50 lines
+            line_frame = ctk.CTkFrame(code_content, fg_color="transparent")
+            line_frame.pack(fill="x")
+            
+            # Line number
+            ctk.CTkLabel(
+                line_frame,
+                text=f"{i:3}",
+                font=ctk.CTkFont(size=11, family="Consolas"),
+                text_color=self.colors["text_muted"],
+                width=30
+            ).pack(side="left")
+            
+            # Code line
+            ctk.CTkLabel(
+                line_frame,
+                text=line,
+                font=ctk.CTkFont(size=12, family="Consolas"),
+                text_color=self.colors["text"],
+                anchor="w"
+            ).pack(side="left", fill="x")
+        
+        if len(lines) > 50:
+            ctk.CTkLabel(
+                code_content,
+                text=f"... {len(lines) - 50} more lines",
+                font=ctk.CTkFont(size=10),
+                text_color=self.colors["text_muted"]
+            ).pack(anchor="w", pady=(4, 0))
 
 
 class ChatWindow:
