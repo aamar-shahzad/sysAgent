@@ -1,6 +1,6 @@
 """
 GUI module for SysAgent CLI.
-Provides graphical interface for settings and OS control.
+Provides graphical interface for settings, OS control, and chat.
 """
 
 # Lazy imports to handle missing tkinter gracefully
@@ -8,9 +8,12 @@ __all__ = [
     "SettingsWindow",
     "DashboardWindow", 
     "MainWindow",
+    "ChatWindow",
+    "ChatInterface",
     "launch_gui",
     "launch_settings",
     "launch_dashboard",
+    "launch_chat",
 ]
 
 
@@ -47,6 +50,22 @@ def MainWindow():
     return MW()
 
 
+def ChatWindow():
+    """Get ChatWindow class."""
+    if not _check_gui_available():
+        raise ImportError("tkinter is not available. Install with: apt-get install python3-tk (Linux) or ensure Python was installed with Tcl/Tk support.")
+    from .chat import ChatWindow as CW
+    return CW()
+
+
+def ChatInterface(parent, on_send=None):
+    """Get ChatInterface class."""
+    if not _check_gui_available():
+        raise ImportError("tkinter is not available. Install with: apt-get install python3-tk (Linux) or ensure Python was installed with Tcl/Tk support.")
+    from .chat import ChatInterface as CI
+    return CI(parent, on_send)
+
+
 def launch_gui():
     """Launch the main GUI application."""
     if not _check_gui_available():
@@ -71,4 +90,13 @@ def launch_dashboard():
         raise ImportError("tkinter is not available. Install with: apt-get install python3-tk (Linux) or ensure Python was installed with Tcl/Tk support.")
     from .dashboard import DashboardWindow
     app = DashboardWindow()
+    app.run()
+
+
+def launch_chat():
+    """Launch the chat GUI only."""
+    if not _check_gui_available():
+        raise ImportError("tkinter is not available. Install with: apt-get install python3-tk (Linux) or ensure Python was installed with Tcl/Tk support.")
+    from .chat import ChatWindow
+    app = ChatWindow()
     app.run()

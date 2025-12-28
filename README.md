@@ -33,10 +33,13 @@
 - **LowLevelOSTool**: Low-level OS operations
 
 ### 🖥️ GUI Features
+- **Chat Interface**: Natural language interaction with SysAgent in a beautiful GUI
 - **Settings GUI**: Configure API keys, model providers, and permissions
 - **System Dashboard**: Real-time system monitoring with graphs
 - **Process Manager**: Visual process management interface
 - **File Browser**: Graphical file operations
+- **Terminal View**: Execute shell commands directly
+- **Theme Support**: Dark/Light mode switching
 
 ### 🔒 Security & Safety
 - Permission-gated execution with OS-specific implementations
@@ -135,8 +138,11 @@ sysagent "monitor my project's resource usage"
 ### GUI Commands
 
 ```bash
-# Launch the main GUI
+# Launch the main GUI with chat interface
 sysagent gui
+
+# Open standalone chat window
+sysagent chat
 
 # Open settings to configure API keys
 sysagent settings

@@ -20,25 +20,45 @@ except ImportError:
 
 
 class MainWindow:
-    """Main application window combining dashboard and settings."""
+    """Main application window combining dashboard, chat, and settings."""
 
     def __init__(self):
         self.root = None
-        self.current_view = "dashboard"
+        self.current_view = "chat"  # Default to chat view
+        self.current_theme = "dark"
+        self.agent = None
+        self.chat_interface = None
+        self._initialize_agent()
         self._create_window()
         self._create_menu()
         self._create_content()
 
+    def _initialize_agent(self):
+        """Initialize the LangGraph agent."""
+        try:
+            from ..core.config import ConfigManager
+            from ..core.permissions import PermissionManager
+            from ..core.langgraph_agent import LangGraphAgent
+            
+            self.config_manager = ConfigManager()
+            self.permission_manager = PermissionManager(self.config_manager)
+            self.agent = LangGraphAgent(self.config_manager, self.permission_manager)
+        except Exception as e:
+            print(f"Warning: Could not initialize agent: {e}")
+            self.agent = None
+            self.config_manager = None
+            self.permission_manager = None
+
     def _create_window(self):
         """Create the main window."""
         if USE_CUSTOMTKINTER:
-            ctk.set_appearance_mode("dark")
+            ctk.set_appearance_mode(self.current_theme)
             ctk.set_default_color_theme("blue")
             self.root = ctk.CTk()
         else:
             self.root = tk.Tk()
         
-        self.root.title("SysAgent - System Control Center")
+        self.root.title("SysAgent - Intelligent System Assistant")
         self.root.geometry("1400x900")
         self.root.minsize(1200, 800)
         
@@ -59,7 +79,8 @@ class MainWindow:
         # File menu
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Dashboard", command=self._show_dashboard)
+        file_menu.add_command(label="New Chat", command=self._new_chat)
+        file_menu.add_separator()
         file_menu.add_command(label="Settings", command=self._show_settings)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self._on_exit)
@@ -67,6 +88,10 @@ class MainWindow:
         # View menu
         view_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="View", menu=view_menu)
+        view_menu.add_command(label="Chat", command=self._show_chat)
+        view_menu.add_command(label="Dashboard", command=self._show_dashboard)
+        view_menu.add_command(label="Terminal", command=self._show_terminal)
+        view_menu.add_separator()
         view_menu.add_command(label="System Info", command=self._view_system_info)
         view_menu.add_command(label="Processes", command=self._view_processes)
         view_menu.add_command(label="Files", command=self._view_files)
@@ -80,12 +105,35 @@ class MainWindow:
         tools_menu.add_command(label="Check Internet", command=self._check_internet)
         tools_menu.add_separator()
         tools_menu.add_command(label="Run CLI Command", command=self._run_cli_command)
+        tools_menu.add_command(label="Plugin Manager", command=self._show_plugins)
+        
+        # Theme menu
+        theme_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Theme", menu=theme_menu)
+        theme_menu.add_command(label="Dark Mode", command=lambda: self._set_theme("dark"))
+        theme_menu.add_command(label="Light Mode", command=lambda: self._set_theme("light"))
+        theme_menu.add_command(label="System", command=lambda: self._set_theme("system"))
         
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="Documentation", command=self._show_docs)
+        help_menu.add_command(label="Keyboard Shortcuts", command=self._show_shortcuts)
+        help_menu.add_separator()
         help_menu.add_command(label="About", command=self._show_about)
+
+    def _set_theme(self, theme: str):
+        """Set the application theme."""
+        self.current_theme = theme
+        if USE_CUSTOMTKINTER:
+            ctk.set_appearance_mode(theme)
+        messagebox.showinfo("Theme", f"Theme set to: {theme.title()}")
+
+    def _new_chat(self):
+        """Start a new chat session."""
+        if self.chat_interface:
+            self.chat_interface.clear_chat()
+        self._show_chat()
 
     def _create_content(self):
         """Create the main content area."""
@@ -96,13 +144,328 @@ class MainWindow:
             self.content_frame = ttk.Frame(self.root)
             self.content_frame.pack(fill="both", expand=True)
         
-        # Show dashboard by default
-        self._show_dashboard()
+        # Show chat by default
+        self._show_chat()
 
     def _clear_content(self):
         """Clear the content frame."""
         for widget in self.content_frame.winfo_children():
             widget.destroy()
+
+    def _show_chat(self):
+        """Show the chat view."""
+        self._clear_content()
+        self.current_view = "chat"
+        
+        if USE_CUSTOMTKINTER:
+            # Create main layout with sidebar and chat
+            main_container = ctk.CTkFrame(self.content_frame)
+            main_container.pack(fill="both", expand=True)
+            
+            # Sidebar
+            sidebar = ctk.CTkFrame(main_container, width=200, corner_radius=0)
+            sidebar.pack(side="left", fill="y")
+            sidebar.pack_propagate(False)
+            
+            # Logo
+            logo = ctk.CTkLabel(
+                sidebar,
+                text="🧠 SysAgent",
+                font=ctk.CTkFont(size=20, weight="bold")
+            )
+            logo.pack(pady=30)
+            
+            # Navigation buttons
+            nav_buttons = [
+                ("💬 Chat", self._show_chat),
+                ("🏠 Dashboard", self._show_dashboard),
+                ("💻 System Info", self._view_system_info),
+                ("📊 Processes", self._view_processes),
+                ("📁 Files", self._view_files),
+                ("🌐 Network", self._view_network),
+                ("🖥️ Terminal", self._show_terminal),
+                ("⚙️ Settings", self._show_settings),
+            ]
+            
+            for text, command in nav_buttons:
+                btn = ctk.CTkButton(
+                    sidebar,
+                    text=text,
+                    command=command,
+                    width=180,
+                    height=35,
+                    anchor="w"
+                )
+                btn.pack(pady=3, padx=10)
+            
+            # Quick status at bottom
+            status_frame = ctk.CTkFrame(sidebar)
+            status_frame.pack(side="bottom", fill="x", padx=10, pady=10)
+            
+            if PSUTIL_AVAILABLE:
+                cpu = psutil.cpu_percent()
+                mem = psutil.virtual_memory().percent
+                ctk.CTkLabel(status_frame, text=f"CPU: {cpu}%", font=ctk.CTkFont(size=10)).pack()
+                ctk.CTkLabel(status_frame, text=f"RAM: {mem}%", font=ctk.CTkFont(size=10)).pack()
+            
+            # Chat area
+            chat_container = ctk.CTkFrame(main_container)
+            chat_container.pack(side="right", fill="both", expand=True)
+            
+            # Create chat interface
+            from .chat import ChatInterface
+            self.chat_interface = ChatInterface(chat_container, on_send=self._on_chat_message)
+        else:
+            # Simpler layout for standard tkinter
+            sidebar = ttk.Frame(self.content_frame, width=200)
+            sidebar.pack(side="left", fill="y")
+            
+            ttk.Label(sidebar, text="🧠 SysAgent", font=("", 14, "bold")).pack(pady=20)
+            
+            buttons = [
+                ("Chat", self._show_chat),
+                ("Dashboard", self._show_dashboard),
+                ("System Info", self._view_system_info),
+                ("Processes", self._view_processes),
+                ("Files", self._view_files),
+                ("Settings", self._show_settings),
+            ]
+            
+            for text, cmd in buttons:
+                ttk.Button(sidebar, text=text, command=cmd).pack(pady=3, padx=10, fill="x")
+            
+            # Chat area
+            chat_container = ttk.Frame(self.content_frame)
+            chat_container.pack(side="right", fill="both", expand=True)
+            
+            from .chat import ChatInterface
+            self.chat_interface = ChatInterface(chat_container, on_send=self._on_chat_message)
+
+    def _on_chat_message(self, message: str):
+        """Handle chat message from user."""
+        if self.agent:
+            try:
+                result = self.agent.process_command(message)
+                
+                if result.get('success'):
+                    response = result.get('message', 'Command executed successfully.')
+                    
+                    # Add tool info if available
+                    if result.get('data', {}).get('tools_used'):
+                        tools = result['data']['tools_used']
+                        response += f"\n\n[Tools used: {', '.join(tools)}]"
+                    
+                    # Add data summary if verbose
+                    data = result.get('data', {})
+                    if data and not data.get('tools_used'):
+                        # Format some data for display
+                        if isinstance(data, dict):
+                            data_str = self._format_data(data)
+                            if data_str:
+                                response += f"\n\n{data_str}"
+                else:
+                    response = f"Error: {result.get('message', 'Unknown error')}"
+                    if result.get('error'):
+                        response += f"\n{result['error']}"
+                
+                self.chat_interface.add_message(response, is_user=False)
+                
+            except Exception as e:
+                self.chat_interface.add_message(f"Error processing command: {str(e)}", is_user=False)
+        else:
+            self.chat_interface.add_message(
+                "Agent not available. Please check your configuration and API keys in Settings.",
+                is_user=False
+            )
+
+    def _format_data(self, data: dict, max_items: int = 10) -> str:
+        """Format data dictionary for display."""
+        lines = []
+        count = 0
+        for key, value in data.items():
+            if count >= max_items:
+                lines.append("...")
+                break
+            if isinstance(value, (str, int, float, bool)):
+                lines.append(f"• {key}: {value}")
+                count += 1
+            elif isinstance(value, list) and len(value) <= 5:
+                lines.append(f"• {key}: {value}")
+                count += 1
+        return "\n".join(lines)
+
+    def _show_terminal(self):
+        """Show terminal/command output view."""
+        self._clear_content()
+        self.current_view = "terminal"
+        
+        if USE_CUSTOMTKINTER:
+            # Create terminal view
+            terminal_frame = ctk.CTkFrame(self.content_frame)
+            terminal_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            # Title
+            title = ctk.CTkLabel(
+                terminal_frame,
+                text="🖥️ Terminal Output",
+                font=ctk.CTkFont(size=20, weight="bold")
+            )
+            title.pack(pady=10)
+            
+            # Output area
+            self.terminal_output = ctk.CTkTextbox(
+                terminal_frame,
+                font=ctk.CTkFont(family="Courier", size=12),
+                wrap="word"
+            )
+            self.terminal_output.pack(fill="both", expand=True, padx=10, pady=5)
+            
+            # Input area
+            input_frame = ctk.CTkFrame(terminal_frame)
+            input_frame.pack(fill="x", padx=10, pady=10)
+            
+            ctk.CTkLabel(input_frame, text="$").pack(side="left", padx=5)
+            
+            self.terminal_input = ctk.CTkEntry(input_frame, placeholder_text="Enter command...")
+            self.terminal_input.pack(side="left", fill="x", expand=True, padx=5)
+            self.terminal_input.bind("<Return>", self._run_terminal_command)
+            
+            run_btn = ctk.CTkButton(
+                input_frame,
+                text="Run",
+                width=80,
+                command=self._run_terminal_command
+            )
+            run_btn.pack(side="right", padx=5)
+            
+            # Add welcome message
+            self.terminal_output.insert("end", "SysAgent Terminal\n")
+            self.terminal_output.insert("end", "=" * 50 + "\n")
+            self.terminal_output.insert("end", "Enter shell commands below. Use with caution!\n\n")
+        else:
+            ttk.Label(self.content_frame, text="Terminal View", font=("", 16)).pack(pady=20)
+            self.terminal_output = tk.Text(self.content_frame, font=("Courier", 10))
+            self.terminal_output.pack(fill="both", expand=True, padx=10, pady=5)
+            
+            input_frame = ttk.Frame(self.content_frame)
+            input_frame.pack(fill="x", padx=10, pady=10)
+            
+            self.terminal_input = ttk.Entry(input_frame)
+            self.terminal_input.pack(side="left", fill="x", expand=True)
+            self.terminal_input.bind("<Return>", self._run_terminal_command)
+            
+            ttk.Button(input_frame, text="Run", command=self._run_terminal_command).pack(side="right")
+
+    def _run_terminal_command(self, event=None):
+        """Run a terminal command."""
+        import subprocess
+        
+        if USE_CUSTOMTKINTER:
+            command = self.terminal_input.get()
+            self.terminal_input.delete(0, "end")
+        else:
+            command = self.terminal_input.get()
+            self.terminal_input.delete(0, "end")
+        
+        if not command.strip():
+            return
+        
+        self.terminal_output.insert("end", f"$ {command}\n")
+        
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.stdout:
+                self.terminal_output.insert("end", result.stdout)
+            if result.stderr:
+                self.terminal_output.insert("end", f"[stderr] {result.stderr}")
+            
+            self.terminal_output.insert("end", "\n")
+        except subprocess.TimeoutExpired:
+            self.terminal_output.insert("end", "[Timeout: Command took too long]\n\n")
+        except Exception as e:
+            self.terminal_output.insert("end", f"[Error: {str(e)}]\n\n")
+        
+        # Scroll to bottom
+        self.terminal_output.see("end")
+
+    def _show_plugins(self):
+        """Show plugin manager."""
+        if USE_CUSTOMTKINTER:
+            plugin_window = ctk.CTkToplevel(self.root)
+        else:
+            plugin_window = tk.Toplevel(self.root)
+        
+        plugin_window.title("Plugin Manager")
+        plugin_window.geometry("600x400")
+        
+        try:
+            from ..core.plugins import PluginManager
+            pm = PluginManager()
+            discovered = pm.discover_plugins()
+            loaded = pm.list_plugins()
+            
+            if USE_CUSTOMTKINTER:
+                title = ctk.CTkLabel(
+                    plugin_window,
+                    text="Plugin Manager",
+                    font=ctk.CTkFont(size=18, weight="bold")
+                )
+                title.pack(pady=10)
+                
+                # Discovered plugins
+                ctk.CTkLabel(plugin_window, text="Discovered Plugins:").pack(anchor="w", padx=10)
+                
+                for plugin in discovered:
+                    frame = ctk.CTkFrame(plugin_window)
+                    frame.pack(fill="x", padx=10, pady=2)
+                    
+                    ctk.CTkLabel(frame, text=plugin.get('name', 'Unknown')).pack(side="left", padx=5)
+                    status = "Loaded" if plugin.get('loaded') else "Not Loaded"
+                    ctk.CTkLabel(frame, text=status, text_color="green" if plugin.get('loaded') else "gray").pack(side="right", padx=5)
+                
+                if not discovered:
+                    ctk.CTkLabel(plugin_window, text="No plugins found. Create one with 'sysagent plugins create <name>'").pack(pady=10)
+            else:
+                ttk.Label(plugin_window, text="Plugin Manager", font=("", 14, "bold")).pack(pady=10)
+                
+                for plugin in discovered:
+                    text = f"{plugin.get('name', 'Unknown')} - {'Loaded' if plugin.get('loaded') else 'Not Loaded'}"
+                    ttk.Label(plugin_window, text=text).pack(anchor="w", padx=10)
+                
+                if not discovered:
+                    ttk.Label(plugin_window, text="No plugins found").pack(pady=10)
+        except Exception as e:
+            if USE_CUSTOMTKINTER:
+                ctk.CTkLabel(plugin_window, text=f"Error: {e}").pack(pady=20)
+            else:
+                ttk.Label(plugin_window, text=f"Error: {e}").pack(pady=20)
+
+    def _show_shortcuts(self):
+        """Show keyboard shortcuts."""
+        shortcuts = """
+Keyboard Shortcuts:
+
+Ctrl+N    - New Chat
+Ctrl+D    - Show Dashboard  
+Ctrl+S    - Open Settings
+Ctrl+T    - Open Terminal
+Ctrl+Q    - Quit
+
+In Chat:
+Enter     - Send message
+Shift+Enter - New line
+
+In Terminal:
+Enter     - Run command
+"""
+        messagebox.showinfo("Keyboard Shortcuts", shortcuts)
 
     def _show_dashboard(self):
         """Show the dashboard view."""

@@ -873,6 +873,21 @@ def dashboard(ctx):
         console.print(f"[red]Error opening dashboard:[/red] {e}")
 
 
+@cli.command()
+@click.pass_context
+def chat(ctx):
+    """Open the chat GUI for interacting with SysAgent."""
+    console.print("[blue]Opening SysAgent Chat...[/blue]")
+    try:
+        from ..gui import launch_chat
+        launch_chat()
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] GUI dependencies not installed. Install with: pip install sysagent-cli[gui]")
+        console.print(f"[dim]Details: {e}[/dim]")
+    except Exception as e:
+        console.print(f"[red]Error opening chat:[/red] {e}")
+
+
 # Plugin management commands
 @cli.group()
 @click.pass_context
