@@ -20,6 +20,8 @@ from .logging import (
 from .session_manager import SessionManager, Session, Message
 from .agent_modes import AgentMode, AgentModeManager, ModeConfig, get_mode_manager
 from .activity_tracker import ActivityTracker, Activity, ActivityType, get_activity_tracker
+from .smart_learning import SmartLearningSystem, get_learning_system
+from .proactive_monitor import ProactiveMonitor, Alert, AlertLevel, get_monitor, start_monitoring
 
 __all__ = [
     "SysAgent",
@@ -52,4 +54,13 @@ __all__ = [
     "Activity",
     "ActivityType",
     "get_activity_tracker",
+    # Smart Learning
+    "SmartLearningSystem",
+    "get_learning_system",
+    # Proactive Monitoring
+    "ProactiveMonitor",
+    "Alert",
+    "AlertLevel",
+    "get_monitor",
+    "start_monitoring",
 ] 

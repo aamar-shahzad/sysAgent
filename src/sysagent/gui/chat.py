@@ -1,6 +1,7 @@
 """
 Smooth, Polished Chat Interface for SysAgent.
 Optimized for smoothness and responsiveness like CLI.
+Includes smart learning integration, favorites, and proactive suggestions.
 """
 
 import tkinter as tk
@@ -19,6 +20,23 @@ try:
     CTK_AVAILABLE = True
 except ImportError:
     CTK_AVAILABLE = False
+
+# Import smart features
+try:
+    from ..core.smart_learning import get_learning_system
+    LEARNING_AVAILABLE = True
+except ImportError:
+    LEARNING_AVAILABLE = False
+    def get_learning_system():
+        return None
+
+try:
+    from ..core.proactive_monitor import get_monitor
+    MONITOR_AVAILABLE = True
+except ImportError:
+    MONITOR_AVAILABLE = False
+    def get_monitor():
+        return None
 
 
 class MessageType(Enum):
@@ -340,6 +358,20 @@ class ChatInterface:
         right = ctk.CTkFrame(header, fg_color="transparent")
         right.pack(side="right", pady=8, padx=12)
         
+        # Alerts button (shows if there are alerts)
+        self.alerts_btn = ctk.CTkButton(
+            right,
+            text="🔔",
+            width=32,
+            height=32,
+            corner_radius=6,
+            fg_color="transparent",
+            hover_color=self.colors["bg_hover"],
+            command=self._show_alerts
+        )
+        self.alerts_btn.pack(side="left", padx=2)
+        self._update_alerts_badge()
+        
         for icon, cmd in [("🗑", self.clear_chat), ("📤", self._export_chat)]:
             btn = ctk.CTkButton(
                 right,
@@ -352,6 +384,153 @@ class ChatInterface:
                 command=cmd
             )
             btn.pack(side="left", padx=2)
+    
+    def _update_alerts_badge(self):
+        """Update alerts button badge."""
+        if not CTK_AVAILABLE or not hasattr(self, 'alerts_btn'):
+            return
+        
+        alert_count = 0
+        if MONITOR_AVAILABLE:
+            try:
+                monitor = get_monitor()
+                if monitor:
+                    alerts = monitor.get_active_alerts()
+                    alert_count = len(alerts)
+            except Exception:
+                pass
+        
+        if alert_count > 0:
+            self.alerts_btn.configure(
+                text=f"🔔{alert_count}",
+                text_color=self.colors["warning"]
+            )
+        else:
+            self.alerts_btn.configure(
+                text="🔔",
+                text_color=self.colors["text_secondary"]
+            )
+    
+    def _show_alerts(self):
+        """Show alerts popup."""
+        if not CTK_AVAILABLE:
+            return
+        
+        popup = ctk.CTkToplevel(self.parent)
+        popup.title("Alerts")
+        popup.geometry("450x350")
+        popup.transient(self.parent)
+        
+        # Header
+        header = ctk.CTkFrame(popup, fg_color=self.colors["bg_secondary"])
+        header.pack(fill="x")
+        
+        h_inner = ctk.CTkFrame(header, fg_color="transparent")
+        h_inner.pack(fill="x", padx=16, pady=12)
+        
+        ctk.CTkLabel(
+            h_inner,
+            text="🔔 System Alerts",
+            font=ctk.CTkFont(size=16, weight="bold")
+        ).pack(side="left")
+        
+        ctk.CTkButton(
+            h_inner,
+            text="Dismiss All",
+            width=90,
+            height=28,
+            corner_radius=6,
+            font=ctk.CTkFont(size=11),
+            fg_color=self.colors["bg_hover"],
+            command=lambda: self._dismiss_all_alerts(popup)
+        ).pack(side="right")
+        
+        # Content
+        content = ctk.CTkScrollableFrame(popup, fg_color=self.colors["bg"])
+        content.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        alerts = []
+        if MONITOR_AVAILABLE:
+            try:
+                monitor = get_monitor()
+                if monitor:
+                    alerts = monitor.get_active_alerts()
+            except Exception:
+                pass
+        
+        if not alerts:
+            ctk.CTkLabel(
+                content,
+                text="✅ No active alerts\nYour system is running smoothly!",
+                text_color=self.colors["success"],
+                font=ctk.CTkFont(size=13)
+            ).pack(pady=40)
+        else:
+            for alert in alerts:
+                level_color = {
+                    'critical': self.colors["error"],
+                    'warning': self.colors["warning"],
+                    'info': self.colors["accent"]
+                }.get(alert.level, self.colors["text_secondary"])
+                
+                row = ctk.CTkFrame(
+                    content,
+                    fg_color=self.colors["bg_secondary"],
+                    corner_radius=8,
+                    border_width=1,
+                    border_color=level_color
+                )
+                row.pack(fill="x", pady=4)
+                
+                row_inner = ctk.CTkFrame(row, fg_color="transparent")
+                row_inner.pack(fill="x", padx=12, pady=10)
+                
+                # Title
+                ctk.CTkLabel(
+                    row_inner,
+                    text=alert.title,
+                    font=ctk.CTkFont(size=13, weight="bold"),
+                    text_color=level_color
+                ).pack(anchor="w")
+                
+                # Message
+                ctk.CTkLabel(
+                    row_inner,
+                    text=alert.message,
+                    font=ctk.CTkFont(size=11),
+                    text_color=self.colors["text_secondary"],
+                    wraplength=380
+                ).pack(anchor="w", pady=(4, 0))
+                
+                # Action button if available
+                if alert.action:
+                    ctk.CTkButton(
+                        row_inner,
+                        text=alert.suggestion or "Fix",
+                        height=26,
+                        corner_radius=6,
+                        font=ctk.CTkFont(size=10),
+                        fg_color=self.colors["accent"],
+                        command=lambda a=alert.action, p=popup: self._execute_alert_action(a, p)
+                    ).pack(anchor="w", pady=(8, 0))
+    
+    def _dismiss_all_alerts(self, popup):
+        """Dismiss all alerts."""
+        if MONITOR_AVAILABLE:
+            try:
+                monitor = get_monitor()
+                if monitor:
+                    monitor.dismiss_all()
+            except Exception:
+                pass
+        popup.destroy()
+        self._update_alerts_badge()
+    
+    def _execute_alert_action(self, action: str, popup):
+        """Execute an alert action."""
+        popup.destroy()
+        self._quick_send(action)
+        self._update_alerts_badge()
     
     def _create_messages_area(self):
         """Create messages area."""
@@ -440,21 +619,17 @@ class ChatInterface:
         self._create_quick_actions(container)
     
     def _create_quick_actions(self, parent):
-        """Create quick action chips."""
+        """Create quick action chips with smart suggestions."""
         if not CTK_AVAILABLE:
             return
         
         actions_frame = ctk.CTkFrame(parent, fg_color="transparent")
         actions_frame.pack(fill="x", padx=16, pady=(0, 12))
         
-        actions = [
-            ("📊 Status", "Show system status"),
-            ("🏥 Health", "Run health check"),
-            ("💾 Disk", "Check disk space"),
-            ("🔍 Search", "Search for files"),
-        ]
+        # Get smart suggestions if available
+        actions = self._get_smart_suggestions()
         
-        for text, cmd in actions:
+        for text, cmd in actions[:5]:
             btn = ctk.CTkButton(
                 actions_frame,
                 text=text,
@@ -467,6 +642,240 @@ class ChatInterface:
                 command=lambda c=cmd: self._quick_send(c)
             )
             btn.pack(side="left", padx=3)
+        
+        # Add favorites button
+        fav_btn = ctk.CTkButton(
+            actions_frame,
+            text="⭐",
+            width=28,
+            height=28,
+            corner_radius=14,
+            font=ctk.CTkFont(size=12),
+            fg_color=self.colors["bg_hover"],
+            hover_color=self.colors["border"],
+            text_color=self.colors["warning"],
+            command=self._show_favorites
+        )
+        fav_btn.pack(side="right", padx=3)
+        
+        # Add history button
+        hist_btn = ctk.CTkButton(
+            actions_frame,
+            text="📜",
+            width=28,
+            height=28,
+            corner_radius=14,
+            font=ctk.CTkFont(size=12),
+            fg_color=self.colors["bg_hover"],
+            hover_color=self.colors["border"],
+            text_color=self.colors["text_secondary"],
+            command=self._show_history
+        )
+        hist_btn.pack(side="right", padx=3)
+    
+    def _get_smart_suggestions(self) -> List[tuple]:
+        """Get smart suggestions based on learning."""
+        default_actions = [
+            ("📊 Status", "Show system status"),
+            ("🏥 Health", "Run health check"),
+            ("💾 Disk", "Check disk space"),
+            ("🔍 Search", "Search for files"),
+        ]
+        
+        if not LEARNING_AVAILABLE:
+            return default_actions
+        
+        try:
+            learning = get_learning_system()
+            if not learning:
+                return default_actions
+            
+            # Get time-based suggestions
+            time_suggestions = learning.get_time_based_suggestions()
+            if time_suggestions:
+                smart_actions = []
+                for s in time_suggestions[:2]:
+                    cmd = s.get('command', '')
+                    if cmd:
+                        # Get first word as label
+                        label = cmd.split()[0].title() if cmd else "Run"
+                        smart_actions.append((f"⚡ {label}", cmd))
+                smart_actions.extend(default_actions[:3])
+                return smart_actions
+            
+            # Get most used commands
+            most_used = learning.get_most_used_commands(3)
+            if most_used:
+                smart_actions = []
+                for cmd, count in most_used:
+                    label = cmd.split()[0].title() if cmd else "Run"
+                    smart_actions.append((f"🔄 {label}", cmd))
+                smart_actions.extend(default_actions[:2])
+                return smart_actions
+        except Exception:
+            pass
+        
+        return default_actions
+    
+    def _show_favorites(self):
+        """Show favorites popup."""
+        if not CTK_AVAILABLE:
+            return
+        
+        popup = ctk.CTkToplevel(self.parent)
+        popup.title("Favorites")
+        popup.geometry("400x300")
+        popup.transient(self.parent)
+        
+        # Header
+        header = ctk.CTkFrame(popup, fg_color=self.colors["bg_secondary"])
+        header.pack(fill="x")
+        ctk.CTkLabel(
+            header,
+            text="⭐ Favorites",
+            font=ctk.CTkFont(size=16, weight="bold")
+        ).pack(pady=12)
+        
+        # Content
+        content = ctk.CTkScrollableFrame(popup, fg_color=self.colors["bg"])
+        content.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        favorites = []
+        if LEARNING_AVAILABLE:
+            try:
+                learning = get_learning_system()
+                if learning:
+                    favorites = learning.get_favorites()
+            except Exception:
+                pass
+        
+        if not favorites:
+            ctk.CTkLabel(
+                content,
+                text="No favorites yet.\nSave commands as favorites from history.",
+                text_color=self.colors["text_muted"],
+                font=ctk.CTkFont(size=12)
+            ).pack(pady=30)
+        else:
+            for fav in favorites:
+                row = ctk.CTkFrame(content, fg_color=self.colors["bg_hover"], corner_radius=8)
+                row.pack(fill="x", pady=2)
+                
+                ctk.CTkLabel(
+                    row,
+                    text=fav.get('name', 'Unnamed'),
+                    font=ctk.CTkFont(weight="bold")
+                ).pack(anchor="w", padx=10, pady=(8, 2))
+                
+                ctk.CTkLabel(
+                    row,
+                    text=fav.get('command', '')[:50],
+                    text_color=self.colors["text_secondary"],
+                    font=ctk.CTkFont(size=11)
+                ).pack(anchor="w", padx=10, pady=(0, 8))
+                
+                row.bind("<Button-1>", lambda e, c=fav.get('command', ''): self._use_favorite(c, popup))
+    
+    def _use_favorite(self, command: str, popup):
+        """Use a favorite command."""
+        popup.destroy()
+        self._quick_send(command)
+    
+    def _show_history(self):
+        """Show command history popup."""
+        if not CTK_AVAILABLE:
+            return
+        
+        popup = ctk.CTkToplevel(self.parent)
+        popup.title("History")
+        popup.geometry("500x400")
+        popup.transient(self.parent)
+        
+        # Header with search
+        header = ctk.CTkFrame(popup, fg_color=self.colors["bg_secondary"])
+        header.pack(fill="x")
+        
+        ctk.CTkLabel(
+            header,
+            text="📜 Command History",
+            font=ctk.CTkFont(size=16, weight="bold")
+        ).pack(pady=(12, 8))
+        
+        search_entry = ctk.CTkEntry(
+            header,
+            placeholder_text="Search history...",
+            width=300
+        )
+        search_entry.pack(pady=(0, 12))
+        
+        # Content
+        content = ctk.CTkScrollableFrame(popup, fg_color=self.colors["bg"])
+        content.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        def render_history(query: str = ""):
+            # Clear
+            for w in content.winfo_children():
+                w.destroy()
+            
+            history = []
+            if LEARNING_AVAILABLE:
+                try:
+                    learning = get_learning_system()
+                    if learning:
+                        history = learning.search_history(query, limit=30)
+                except Exception:
+                    pass
+            
+            # Also include local command history
+            for cmd in self.command_history[-20:]:
+                if not query or query.lower() in cmd.lower():
+                    history.append({'command': cmd, 'timestamp': ''})
+            
+            if not history:
+                ctk.CTkLabel(
+                    content,
+                    text="No history found",
+                    text_color=self.colors["text_muted"]
+                ).pack(pady=30)
+                return
+            
+            for entry in history[:30]:
+                cmd = entry.get('command', '')
+                if not cmd:
+                    continue
+                
+                row = ctk.CTkFrame(content, fg_color=self.colors["bg_hover"], corner_radius=6)
+                row.pack(fill="x", pady=2)
+                
+                row_inner = ctk.CTkFrame(row, fg_color="transparent")
+                row_inner.pack(fill="x", padx=10, pady=8)
+                
+                ctk.CTkLabel(
+                    row_inner,
+                    text=cmd[:60] + ("..." if len(cmd) > 60 else ""),
+                    font=ctk.CTkFont(size=12),
+                    anchor="w"
+                ).pack(side="left", fill="x", expand=True)
+                
+                # Use button
+                ctk.CTkButton(
+                    row_inner,
+                    text="Use",
+                    width=50,
+                    height=24,
+                    corner_radius=4,
+                    font=ctk.CTkFont(size=10),
+                    fg_color=self.colors["accent"],
+                    command=lambda c=cmd: self._use_history(c, popup)
+                ).pack(side="right")
+        
+        search_entry.bind("<KeyRelease>", lambda e: render_history(search_entry.get()))
+        render_history()
+    
+    def _use_history(self, command: str, popup):
+        """Use a command from history."""
+        popup.destroy()
+        self._quick_send(command)
     
     def _show_placeholder(self):
         """Show placeholder."""
@@ -546,6 +955,15 @@ class ChatInterface:
             self.command_history.append(content)
         self.history_index = -1
         self.last_query = content
+        
+        # Record to learning system
+        if LEARNING_AVAILABLE:
+            try:
+                learning = get_learning_system()
+                if learning:
+                    learning.record_command(content, success=True)
+            except Exception:
+                pass
         
         # Add user message
         self._add_message(content, MessageType.USER)
