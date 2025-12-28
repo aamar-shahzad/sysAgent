@@ -1,6 +1,7 @@
 """
 Main GUI Window for SysAgent - Full-featured intelligent assistant.
 Includes all smart features: learning, monitoring, snippets, shortcuts.
+Now with theme toggle, keyboard shortcuts panel, and more UI improvements.
 """
 
 import tkinter as tk
@@ -8,7 +9,10 @@ from tkinter import ttk, messagebox, filedialog
 from typing import Optional, List, Dict, Any
 import threading
 import time
+import json
+import os
 from datetime import datetime
+from pathlib import Path
 
 try:
     import customtkinter as ctk
@@ -48,22 +52,48 @@ except ImportError:
     DEEP_AGENT_AVAILABLE = False
 
 
-# Theme colors
-COLORS = {
-    "bg": "#0a0a0f",
-    "bg_secondary": "#12121a",
-    "bg_tertiary": "#1a1a24",
-    "sidebar": "#0d0d14",
-    "border": "#2a2a35",
-    "text": "#ffffff",
-    "text_secondary": "#9898a8",
-    "text_muted": "#5a5a6a",
-    "accent": "#4a6cf7",
-    "accent_hover": "#5a7cff",
-    "success": "#22c55e",
-    "warning": "#f59e0b",
-    "error": "#ef4444",
+# Theme definitions
+THEMES = {
+    "dark": {
+        "bg": "#0a0a0f",
+        "bg_secondary": "#12121a",
+        "bg_tertiary": "#1a1a24",
+        "bg_hover": "#22222e",
+        "sidebar": "#0d0d14",
+        "border": "#2a2a35",
+        "border_focus": "#4a6cf7",
+        "text": "#ffffff",
+        "text_secondary": "#9898a8",
+        "text_muted": "#5a5a6a",
+        "accent": "#4a6cf7",
+        "accent_hover": "#5a7cff",
+        "success": "#22c55e",
+        "warning": "#f59e0b",
+        "error": "#ef4444",
+        "code_bg": "#15151f",
+    },
+    "light": {
+        "bg": "#ffffff",
+        "bg_secondary": "#f5f5f7",
+        "bg_tertiary": "#e8e8ed",
+        "bg_hover": "#dcdce2",
+        "sidebar": "#f0f0f5",
+        "border": "#d0d0d8",
+        "border_focus": "#4a6cf7",
+        "text": "#1a1a1a",
+        "text_secondary": "#555566",
+        "text_muted": "#888899",
+        "accent": "#4a6cf7",
+        "accent_hover": "#3a5ce7",
+        "success": "#16a34a",
+        "warning": "#d97706",
+        "error": "#dc2626",
+        "code_bg": "#f0f0f5",
+    }
 }
+
+# Current theme colors (will be updated based on selection)
+COLORS = THEMES["dark"].copy()
 
 
 class MainWindow:
@@ -72,7 +102,7 @@ class MainWindow:
     def __init__(self):
         self.root = None
         self.current_view = "chat"
-        self.current_theme = "dark"
+        self.current_theme = self._load_theme_preference()
         self.agent = None
         self.chat_interface = None
         self.command_palette = None
@@ -82,13 +112,63 @@ class MainWindow:
         self.session_manager = None
         self.learning = None
         self.monitor = None
+        self.collapsed_sections: Dict[str, bool] = {}
+        self.sidebar_buttons: Dict[str, ctk.CTkButton] = {}
         
         self._initialize_agent()
         self._initialize_smart_features()
+        self._apply_theme()
         self._create_window()
         self._create_layout()
         self._setup_keyboard_shortcuts()
         self._start_background_tasks()
+    
+    def _load_theme_preference(self) -> str:
+        """Load theme preference from config."""
+        try:
+            config_path = Path.home() / ".sysagent" / "ui_config.json"
+            if config_path.exists():
+                with open(config_path) as f:
+                    config = json.load(f)
+                    return config.get("theme", "dark")
+        except Exception:
+            pass
+        return "dark"
+    
+    def _save_theme_preference(self):
+        """Save theme preference."""
+        try:
+            config_dir = Path.home() / ".sysagent"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config_path = config_dir / "ui_config.json"
+            
+            config = {}
+            if config_path.exists():
+                with open(config_path) as f:
+                    config = json.load(f)
+            
+            config["theme"] = self.current_theme
+            
+            with open(config_path, "w") as f:
+                json.dump(config, f, indent=2)
+        except Exception:
+            pass
+    
+    def _apply_theme(self):
+        """Apply current theme colors."""
+        global COLORS
+        COLORS = THEMES.get(self.current_theme, THEMES["dark"]).copy()
+        
+        if USE_CUSTOMTKINTER:
+            ctk.set_appearance_mode(self.current_theme)
+    
+    def _toggle_theme(self):
+        """Toggle between dark and light theme."""
+        self.current_theme = "light" if self.current_theme == "dark" else "dark"
+        self._apply_theme()
+        self._save_theme_preference()
+        self._refresh_layout()
+        self._show_toast(f"Switched to {self.current_theme} theme")
 
     def _initialize_agent(self):
         """Initialize the LangGraph agent and Deep Agent wrapper."""
@@ -429,6 +509,35 @@ class MainWindow:
         # Right side actions
         right_frame = ctk.CTkFrame(inner, fg_color="transparent")
         right_frame.pack(side="right")
+        
+        # Theme toggle
+        theme_icon = "🌙" if self.current_theme == "dark" else "☀️"
+        theme_btn = ctk.CTkButton(
+            right_frame,
+            text=theme_icon,
+            width=36,
+            height=36,
+            corner_radius=8,
+            font=ctk.CTkFont(size=16),
+            fg_color="transparent",
+            hover_color=COLORS["bg_tertiary"],
+            command=self._toggle_theme
+        )
+        theme_btn.pack(side="left", padx=2)
+        
+        # Keyboard shortcuts
+        shortcuts_btn = ctk.CTkButton(
+            right_frame,
+            text="⌨️",
+            width=36,
+            height=36,
+            corner_radius=8,
+            font=ctk.CTkFont(size=16),
+            fg_color="transparent",
+            hover_color=COLORS["bg_tertiary"],
+            command=self._show_keyboard_shortcuts
+        )
+        shortcuts_btn.pack(side="left", padx=2)
         
         # Quick actions
         actions = [
@@ -1232,6 +1341,132 @@ class MainWindow:
         if self.monitor:
             self.monitor.dismiss_all()
         popup.destroy()
+    
+    def _show_keyboard_shortcuts(self):
+        """Show keyboard shortcuts panel."""
+        if not USE_CUSTOMTKINTER:
+            return
+        
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("Keyboard Shortcuts")
+        popup.geometry("500x550")
+        popup.transient(self.root)
+        popup.configure(fg_color=COLORS["bg"])
+        
+        # Header
+        header = ctk.CTkFrame(popup, fg_color=COLORS["bg_secondary"])
+        header.pack(fill="x")
+        ctk.CTkLabel(
+            header,
+            text="⌨️ Keyboard Shortcuts",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=COLORS["text"]
+        ).pack(pady=16)
+        
+        # Content
+        content = ctk.CTkScrollableFrame(popup, fg_color=COLORS["bg"])
+        content.pack(fill="both", expand=True, padx=16, pady=16)
+        
+        shortcuts = [
+            ("General", [
+                ("⌘/Ctrl + K", "Open command palette"),
+                ("⌘/Ctrl + N", "New chat"),
+                ("⌘/Ctrl + S", "Open settings"),
+                ("⌘/Ctrl + Q", "Quit application"),
+                ("Escape", "Close popups"),
+                ("⌘/Ctrl + ,", "Toggle theme"),
+            ]),
+            ("Chat", [
+                ("Enter", "Send message"),
+                ("Shift + Enter", "New line"),
+                ("↑ / ↓", "Navigate command history"),
+                ("⌘/Ctrl + L", "Clear chat"),
+            ]),
+            ("Navigation", [
+                ("⌘/Ctrl + 1", "Go to Chat"),
+                ("⌘/Ctrl + 2", "Go to Dashboard"),
+                ("⌘/Ctrl + 3", "Go to Settings"),
+                ("⌘/Ctrl + T", "Open Terminal"),
+            ]),
+            ("Tools", [
+                ("⌘/Ctrl + Shift + H", "Health Check"),
+                ("⌘/Ctrl + Shift + S", "System Status"),
+                ("⌘/Ctrl + Shift + F", "Search Files"),
+            ]),
+        ]
+        
+        for section_title, section_shortcuts in shortcuts:
+            # Section header
+            ctk.CTkLabel(
+                content,
+                text=section_title,
+                font=ctk.CTkFont(size=14, weight="bold"),
+                text_color=COLORS["accent"]
+            ).pack(anchor="w", pady=(16, 8))
+            
+            for shortcut, description in section_shortcuts:
+                row = ctk.CTkFrame(content, fg_color="transparent")
+                row.pack(fill="x", pady=3)
+                
+                # Shortcut badge
+                badge = ctk.CTkFrame(row, fg_color=COLORS["bg_tertiary"], corner_radius=4)
+                badge.pack(side="left")
+                
+                ctk.CTkLabel(
+                    badge,
+                    text=shortcut,
+                    font=ctk.CTkFont(size=11, family="Consolas"),
+                    text_color=COLORS["text"]
+                ).pack(padx=8, pady=4)
+                
+                # Description
+                ctk.CTkLabel(
+                    row,
+                    text=description,
+                    font=ctk.CTkFont(size=12),
+                    text_color=COLORS["text_secondary"]
+                ).pack(side="left", padx=12)
+        
+        # Close button
+        ctk.CTkButton(
+            popup,
+            text="Close",
+            width=100,
+            height=32,
+            corner_radius=6,
+            command=popup.destroy
+        ).pack(pady=16)
+    
+    def _show_toast(self, message: str, toast_type: str = "info"):
+        """Show a toast notification."""
+        if not USE_CUSTOMTKINTER:
+            return
+        
+        type_colors = {
+            "info": COLORS["accent"],
+            "success": COLORS["success"],
+            "warning": COLORS["warning"],
+            "error": COLORS["error"],
+        }
+        
+        bg_color = type_colors.get(toast_type, COLORS["accent"])
+        
+        toast = ctk.CTkFrame(
+            self.root,
+            fg_color=bg_color,
+            corner_radius=8
+        )
+        toast.place(relx=0.5, rely=0.95, anchor="s")
+        
+        ctk.CTkLabel(
+            toast,
+            text=message,
+            font=ctk.CTkFont(size=12),
+            text_color="white"
+        ).pack(padx=20, pady=10)
+        
+        # Auto-dismiss after 2 seconds
+        self.root.after(2000, toast.destroy)
     
     def _show_clipboard(self):
         """Show clipboard actions popup."""

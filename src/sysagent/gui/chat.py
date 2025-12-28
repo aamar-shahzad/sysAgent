@@ -2,6 +2,7 @@
 Smooth, Polished Chat Interface for SysAgent.
 Optimized for smoothness and responsiveness like CLI.
 Includes smart learning integration, favorites, and proactive suggestions.
+Now with search, context menus, drag & drop, and better animations.
 """
 
 import tkinter as tk
@@ -10,10 +11,12 @@ import threading
 import queue
 import re
 import time
-from typing import Optional, Callable, List, Dict, Any
+import os
+from typing import Optional, Callable, List, Dict, Any, Tuple
 from datetime import datetime
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 try:
     import customtkinter as ctk
@@ -395,10 +398,13 @@ class ToolIndicator:
 class ChatInterface:
     """Smooth, polished chat interface."""
     
-    def __init__(self, parent, on_send: Optional[Callable[[str], None]] = None):
+    def __init__(self, parent, on_send: Optional[Callable[[str], None]] = None,
+                 on_file_drop: Optional[Callable[[List[str]], None]] = None):
         self.parent = parent
         self.on_send = on_send
+        self.on_file_drop = on_file_drop
         self.messages: List[ChatMessage] = []
+        self.message_widgets: List[Tuple[ctk.CTkFrame, ChatMessage]] = []  # Track message widgets
         self.message_queue = queue.Queue()
         self.is_processing = False
         self.last_query = ""
@@ -411,9 +417,14 @@ class ChatInterface:
         self.reasoning_panel: Optional[ReasoningPanel] = None
         self.stream_data: Optional[Dict] = None
         self.show_reasoning = True  # Toggle for showing reasoning
+        self.search_mode = False
+        self.search_query = ""
+        self.search_results: List[int] = []
+        self.current_search_index = 0
         
         self._create_ui()
         self._start_queue_processor()
+        self._setup_drag_drop()
     
     def _create_ui(self):
         """Create smooth UI."""
@@ -433,12 +444,12 @@ class ChatInterface:
         if not CTK_AVAILABLE:
             return
         
-        header = ctk.CTkFrame(self.frame, fg_color=self.colors["bg_secondary"], height=48)
-        header.pack(fill="x")
-        header.pack_propagate(False)
+        self.header_frame = ctk.CTkFrame(self.frame, fg_color=self.colors["bg_secondary"], height=48)
+        self.header_frame.pack(fill="x")
+        self.header_frame.pack_propagate(False)
         
         # Left side
-        left = ctk.CTkFrame(header, fg_color="transparent")
+        left = ctk.CTkFrame(self.header_frame, fg_color="transparent")
         left.pack(side="left", pady=10, padx=16)
         
         ctk.CTkLabel(
@@ -466,8 +477,21 @@ class ChatInterface:
         self.status_text.pack(side="left")
         
         # Right side
-        right = ctk.CTkFrame(header, fg_color="transparent")
+        right = ctk.CTkFrame(self.header_frame, fg_color="transparent")
         right.pack(side="right", pady=8, padx=12)
+        
+        # Search button
+        self.search_btn = ctk.CTkButton(
+            right,
+            text="🔍",
+            width=32,
+            height=32,
+            corner_radius=6,
+            fg_color="transparent",
+            hover_color=self.colors["bg_hover"],
+            command=self._toggle_search
+        )
+        self.search_btn.pack(side="left", padx=2)
         
         # Alerts button (shows if there are alerts)
         self.alerts_btn = ctk.CTkButton(
@@ -495,6 +519,10 @@ class ChatInterface:
                 command=cmd
             )
             btn.pack(side="left", padx=2)
+        
+        # Search bar (initially hidden)
+        self.search_frame = ctk.CTkFrame(self.frame, fg_color=self.colors["bg_secondary"], height=50)
+        self._search_visible = False
     
     def _update_alerts_badge(self):
         """Update alerts button badge."""
@@ -683,6 +711,20 @@ class ChatInterface:
         
         input_inner = ctk.CTkFrame(input_wrapper, fg_color="transparent")
         input_inner.pack(fill="x", padx=4, pady=4)
+        
+        # File attachment button
+        attach_btn = ctk.CTkButton(
+            input_inner,
+            text="📎",
+            width=36,
+            height=36,
+            corner_radius=6,
+            font=ctk.CTkFont(size=14),
+            fg_color="transparent",
+            hover_color=self.colors["bg_hover"],
+            command=self._browse_files
+        )
+        attach_btn.pack(side="left", padx=4)
         
         # Text input
         self.input_field = ctk.CTkTextbox(
@@ -1178,8 +1220,15 @@ class ChatInterface:
         except Exception:
             return
         
-        container = ctk.CTkFrame(self.messages_frame, fg_color="transparent")
+        container = ctk.CTkFrame(self.messages_frame, fg_color="transparent", corner_radius=8)
         container.pack(fill="x", padx=16, pady=6)
+        
+        # Track widget for search
+        self.message_widgets.append((container, message))
+        
+        # Bind context menu
+        container.bind("<Button-3>", lambda e, m=message: self._show_message_context_menu(e, m))
+        container.bind("<Button-2>", lambda e, m=message: self._show_message_context_menu(e, m))  # macOS
         
         if message.msg_type == MessageType.USER:
             self._render_user(container, message)
@@ -1624,12 +1673,369 @@ Just type a message below to get started!"""
             for w in self.messages_frame.winfo_children():
                 w.destroy()
             self.messages.clear()
+            self.message_widgets.clear()
             self._add_message("Chat cleared. How can I help?", MessageType.SYSTEM)
         except Exception:
             pass
     
     def get_frame(self):
         return self.frame
+    
+    # ==================== SEARCH FUNCTIONALITY ====================
+    
+    def _toggle_search(self):
+        """Toggle search bar visibility."""
+        if not CTK_AVAILABLE:
+            return
+        
+        if self._search_visible:
+            self._hide_search()
+        else:
+            self._show_search()
+    
+    def _show_search(self):
+        """Show search bar."""
+        self._search_visible = True
+        
+        # Create search bar content
+        for w in self.search_frame.winfo_children():
+            w.destroy()
+        
+        inner = ctk.CTkFrame(self.search_frame, fg_color="transparent")
+        inner.pack(fill="x", padx=16, pady=10)
+        
+        # Search icon
+        ctk.CTkLabel(
+            inner,
+            text="🔍",
+            font=ctk.CTkFont(size=14),
+            text_color=self.colors["text_muted"]
+        ).pack(side="left")
+        
+        # Search entry
+        self.search_entry = ctk.CTkEntry(
+            inner,
+            placeholder_text="Search messages...",
+            height=30,
+            border_width=0,
+            fg_color="transparent",
+            font=ctk.CTkFont(size=13)
+        )
+        self.search_entry.pack(side="left", fill="x", expand=True, padx=10)
+        self.search_entry.bind("<Return>", lambda e: self._do_search())
+        self.search_entry.bind("<KeyRelease>", lambda e: self._on_search_key())
+        self.search_entry.bind("<Escape>", lambda e: self._hide_search())
+        
+        # Results label
+        self.search_results_label = ctk.CTkLabel(
+            inner,
+            text="",
+            font=ctk.CTkFont(size=11),
+            text_color=self.colors["text_muted"]
+        )
+        self.search_results_label.pack(side="left", padx=5)
+        
+        # Navigation buttons
+        ctk.CTkButton(
+            inner,
+            text="▲",
+            width=28,
+            height=28,
+            corner_radius=6,
+            font=ctk.CTkFont(size=10),
+            fg_color=self.colors["bg_hover"],
+            hover_color=self.colors["border"],
+            command=self._search_prev
+        ).pack(side="left", padx=2)
+        
+        ctk.CTkButton(
+            inner,
+            text="▼",
+            width=28,
+            height=28,
+            corner_radius=6,
+            font=ctk.CTkFont(size=10),
+            fg_color=self.colors["bg_hover"],
+            hover_color=self.colors["border"],
+            command=self._search_next
+        ).pack(side="left", padx=2)
+        
+        # Close button
+        ctk.CTkButton(
+            inner,
+            text="✕",
+            width=28,
+            height=28,
+            corner_radius=6,
+            font=ctk.CTkFont(size=10),
+            fg_color="transparent",
+            hover_color=self.colors["bg_hover"],
+            command=self._hide_search
+        ).pack(side="left", padx=2)
+        
+        # Show frame
+        self.search_frame.pack(fill="x", after=self.header_frame)
+        self.search_entry.focus_set()
+    
+    def _hide_search(self):
+        """Hide search bar."""
+        self._search_visible = False
+        self.search_frame.pack_forget()
+        self._clear_search_highlights()
+    
+    def _on_search_key(self):
+        """Handle search key release."""
+        query = self.search_entry.get()
+        if len(query) >= 2:
+            self._do_search()
+        elif len(query) == 0:
+            self._clear_search_highlights()
+            self.search_results_label.configure(text="")
+    
+    def _do_search(self):
+        """Perform search."""
+        query = self.search_entry.get().lower()
+        if not query:
+            return
+        
+        self._clear_search_highlights()
+        self.search_results = []
+        
+        for i, msg in enumerate(self.messages):
+            if query in msg.content.lower():
+                self.search_results.append(i)
+        
+        if self.search_results:
+            self.current_search_index = 0
+            self.search_results_label.configure(
+                text=f"1/{len(self.search_results)}"
+            )
+            self._highlight_search_result()
+        else:
+            self.search_results_label.configure(text="No results")
+    
+    def _search_next(self):
+        """Go to next search result."""
+        if not self.search_results:
+            return
+        
+        self.current_search_index = (self.current_search_index + 1) % len(self.search_results)
+        self.search_results_label.configure(
+            text=f"{self.current_search_index + 1}/{len(self.search_results)}"
+        )
+        self._highlight_search_result()
+    
+    def _search_prev(self):
+        """Go to previous search result."""
+        if not self.search_results:
+            return
+        
+        self.current_search_index = (self.current_search_index - 1) % len(self.search_results)
+        self.search_results_label.configure(
+            text=f"{self.current_search_index + 1}/{len(self.search_results)}"
+        )
+        self._highlight_search_result()
+    
+    def _highlight_search_result(self):
+        """Highlight current search result."""
+        if not self.search_results or not self.message_widgets:
+            return
+        
+        idx = self.search_results[self.current_search_index]
+        
+        # Find the widget for this message
+        if idx < len(self.message_widgets):
+            widget, _ = self.message_widgets[idx]
+            try:
+                # Highlight the widget
+                widget.configure(border_width=2, border_color=self.colors["accent"])
+                
+                # Scroll to it
+                self._scroll_to_bottom()
+            except Exception:
+                pass
+    
+    def _clear_search_highlights(self):
+        """Clear all search highlights."""
+        for widget, _ in self.message_widgets:
+            try:
+                widget.configure(border_width=0)
+            except Exception:
+                pass
+    
+    # ==================== DRAG & DROP ====================
+    
+    def _setup_drag_drop(self):
+        """Setup drag and drop for files."""
+        try:
+            # Try to enable TkDnD if available
+            self.frame.drop_target_register("DND_Files")
+            self.frame.dnd_bind("<<Drop>>", self._on_file_drop)
+            self.frame.dnd_bind("<<DragEnter>>", self._on_drag_enter)
+            self.frame.dnd_bind("<<DragLeave>>", self._on_drag_leave)
+        except Exception:
+            # TkDnD not available, use file button instead
+            pass
+    
+    def _on_drag_enter(self, event=None):
+        """Handle drag enter."""
+        if CTK_AVAILABLE:
+            try:
+                self.messages_frame.configure(border_width=2, border_color=self.colors["accent"])
+            except Exception:
+                pass
+    
+    def _on_drag_leave(self, event=None):
+        """Handle drag leave."""
+        if CTK_AVAILABLE:
+            try:
+                self.messages_frame.configure(border_width=0)
+            except Exception:
+                pass
+    
+    def _on_file_drop(self, event):
+        """Handle file drop."""
+        self._on_drag_leave()
+        
+        try:
+            # Parse dropped files
+            files = event.data.split() if isinstance(event.data, str) else [event.data]
+            
+            # Clean up file paths
+            clean_files = []
+            for f in files:
+                # Remove braces and clean path
+                f = f.strip('{}')
+                if os.path.exists(f):
+                    clean_files.append(f)
+            
+            if clean_files:
+                if self.on_file_drop:
+                    self.on_file_drop(clean_files)
+                else:
+                    # Default: show files in chat
+                    file_list = "\n".join([f"📄 {Path(f).name}" for f in clean_files])
+                    self._add_message(f"Files received:\n{file_list}", MessageType.SYSTEM)
+                    
+                    # Offer to analyze
+                    for f in clean_files:
+                        self._quick_send(f"Analyze file: {f}")
+                        break  # Just analyze first file
+        except Exception as e:
+            self._add_message(f"Error processing files: {e}", MessageType.ERROR)
+    
+    def add_file_button(self, parent):
+        """Add file attachment button."""
+        if not CTK_AVAILABLE:
+            return
+        
+        btn = ctk.CTkButton(
+            parent,
+            text="📎",
+            width=36,
+            height=36,
+            corner_radius=6,
+            fg_color="transparent",
+            hover_color=self.colors["bg_hover"],
+            command=self._browse_files
+        )
+        return btn
+    
+    def _browse_files(self):
+        """Browse for files."""
+        files = filedialog.askopenfilenames(
+            title="Select files",
+            filetypes=[
+                ("All files", "*.*"),
+                ("Text files", "*.txt *.md *.json *.yaml *.yml"),
+                ("Code files", "*.py *.js *.ts *.go *.rs *.java"),
+                ("Log files", "*.log"),
+            ]
+        )
+        
+        if files:
+            if self.on_file_drop:
+                self.on_file_drop(list(files))
+            else:
+                for f in files:
+                    self._quick_send(f"Analyze file: {f}")
+                    break
+    
+    # ==================== CONTEXT MENU ====================
+    
+    def _show_message_context_menu(self, event, message: ChatMessage):
+        """Show context menu for a message."""
+        menu = tk.Menu(self.parent, tearoff=0, 
+                      bg=self.colors["bg_secondary"],
+                      fg=self.colors["text"],
+                      activebackground=self.colors["accent"])
+        
+        menu.add_command(label="📋 Copy", command=lambda: self._copy(message.content))
+        menu.add_separator()
+        
+        if message.msg_type == MessageType.ASSISTANT:
+            menu.add_command(label="🔄 Retry", command=self._retry)
+            menu.add_command(label="👍 Good response", command=lambda: self._record_feedback(5, message.content))
+            menu.add_command(label="👎 Bad response", command=lambda: self._record_feedback(1, message.content))
+            menu.add_separator()
+            menu.add_command(label="💾 Save as snippet", command=lambda: self._save_as_snippet(message.content))
+        
+        if message.msg_type == MessageType.USER:
+            menu.add_command(label="📝 Edit & resend", command=lambda: self._edit_message(message.content))
+            menu.add_command(label="⭐ Add to favorites", command=lambda: self._add_to_favorites(message.content))
+        
+        menu.add_separator()
+        menu.add_command(label="🔍 Search similar", command=lambda: self._search_similar(message.content))
+        
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+    
+    def _save_as_snippet(self, content: str):
+        """Save content as snippet."""
+        if not LEARNING_AVAILABLE:
+            self._toast("Learning system not available")
+            return
+        
+        try:
+            learning = get_learning_system()
+            if learning:
+                # Create a name from first few words
+                name = " ".join(content.split()[:5])
+                if len(name) > 30:
+                    name = name[:30] + "..."
+                learning.save_snippet(name, content, "", ["chat"])
+                self._toast("Saved as snippet!")
+        except Exception as e:
+            self._toast(f"Error: {e}")
+    
+    def _edit_message(self, content: str):
+        """Edit and resend a message."""
+        self._set_input_text(content)
+        self.input_field.focus_set()
+    
+    def _add_to_favorites(self, content: str):
+        """Add command to favorites."""
+        if not LEARNING_AVAILABLE:
+            return
+        
+        try:
+            learning = get_learning_system()
+            if learning:
+                learning.save_snippet(content[:30], content, "", ["favorite"], is_favorite=True)
+                self._toast("Added to favorites!")
+        except Exception:
+            pass
+    
+    def _search_similar(self, content: str):
+        """Search for similar messages."""
+        # Get first few words as search query
+        query = " ".join(content.split()[:3])
+        self._show_search()
+        self.search_entry.delete(0, "end")
+        self.search_entry.insert(0, query)
+        self._do_search()
 
 
 class ChatWindow:
