@@ -668,13 +668,80 @@ class LangGraphAgent:
             except Exception as e:
                 return f"Error: {str(e)}"
 
+        # Workflow tool
+        @tool
+        def workflow_operations(action: str, name: str = None, steps: list = None, 
+                                template: str = None, tool: str = None, params: dict = None) -> str:
+            """Create and run multi-step automated workflows. Actions: create, run, list, get, templates, create_from_template, add_step."""
+            try:
+                tool_params = {"action": action}
+                if name: tool_params["name"] = name
+                if steps: tool_params["steps"] = steps
+                if template: tool_params["template"] = template
+                if tool: tool_params["tool"] = tool
+                if params: tool_params["params"] = params
+                
+                result = self.tool_executor.execute_tool("workflow_tool", **tool_params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # Smart search tool
+        @tool
+        def smart_search(action: str, query: str = None, path: str = None, 
+                        limit: int = None, file_type: str = None) -> str:
+            """Unified search across files, apps, web, commands. Actions: search, files, apps, web, content, recent, commands, history."""
+            try:
+                tool_params = {"action": action}
+                if query: tool_params["query"] = query
+                if path: tool_params["path"] = path
+                if limit: tool_params["limit"] = limit
+                if file_type: tool_params["type"] = file_type
+                
+                result = self.tool_executor.execute_tool("smart_search_tool", **tool_params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # System insights tool
+        @tool
+        def system_insights(action: str, path: str = None) -> str:
+            """AI-powered system analysis and recommendations. Actions: health_check, performance, recommendations, security_scan, resource_hogs, startup_analysis, storage_analysis, network_analysis, optimize, quick_insights."""
+            try:
+                tool_params = {"action": action}
+                if path: tool_params["path"] = path
+                
+                result = self.tool_executor.execute_tool("system_insights_tool", **tool_params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # Context memory tool
+        @tool
+        def context_memory(action: str, key: str = None, value: str = None, 
+                          category: str = None, name: str = None, command: str = None) -> str:
+            """Remember preferences and context. Actions: remember, recall, forget, preferences, set_preference, favorites, add_favorite, suggest, history."""
+            try:
+                tool_params = {"action": action}
+                if key: tool_params["key"] = key
+                if value: tool_params["value"] = value
+                if category: tool_params["category"] = category
+                if name: tool_params["name"] = name
+                if command: tool_params["command"] = command
+                
+                result = self.tool_executor.execute_tool("context_memory_tool", **tool_params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
         tools.extend([
             file_operations, system_info, process_management, network_diagnostics, 
             system_control, generate_code, security_operations, automation_operations, 
             monitoring_operations, os_intelligence, low_level_os,
             document_operations, spreadsheet_operations, app_control, clipboard_operations,
             browser_control, window_control, media_control, send_notification,
-            git_operations, http_request, package_manager
+            git_operations, http_request, package_manager,
+            workflow_operations, smart_search, system_insights, context_memory
         ])
         return tools
 
@@ -686,7 +753,8 @@ class LangGraphAgent:
             AutomationTool, MonitoringTool, OSIntelligenceTool, LowLevelOSTool,
             DocumentTool, SpreadsheetTool, AppTool, ClipboardTool,
             BrowserTool, WindowTool, MediaTool, NotificationTool,
-            GitTool, APITool, PackageManagerTool
+            GitTool, APITool, PackageManagerTool,
+            WorkflowTool, SmartSearchTool, SystemInsightsTool, ContextMemoryTool
         )
         
         # Register all tools
@@ -713,6 +781,10 @@ class LangGraphAgent:
             GitTool(),
             APITool(),
             PackageManagerTool(),
+            WorkflowTool(),
+            SmartSearchTool(),
+            SystemInsightsTool(),
+            ContextMemoryTool(),
         ]
         
         for tool in tools_to_register:
@@ -720,9 +792,9 @@ class LangGraphAgent:
 
     def _create_react_agent(self):
         """Create the React agent using langgraph.prebuilt."""
-        system_prompt = """You are SysAgent, an intelligent assistant that controls the operating system using natural language.
+        system_prompt = """You are SysAgent, a next-level intelligent assistant that controls the entire operating system.
 
-TOOLS AVAILABLE (22 tools):
+TOOLS AVAILABLE (26 tools):
 - file_operations: File operations (list, read, write, delete)
 - system_info: System metrics (CPU, memory, disk)
 - process_management: Process control (list, kill)
@@ -745,23 +817,37 @@ TOOLS AVAILABLE (22 tools):
 - git_operations: Git commands (status, commit, push, pull)
 - http_request: Make API calls (GET, POST, etc.)
 - package_manager: Install/update software packages
+- workflow_operations: Create/run multi-step automated workflows
+- smart_search: Search files, apps, commands, web
+- system_insights: AI-powered health check, recommendations, security scan
+- context_memory: Remember preferences, favorites, patterns
+
+NEXT-LEVEL CAPABILITIES:
+1. WORKFLOWS: Chain multiple actions into reusable workflows
+   - "Create a morning routine" → workflow_operations(action="create_from_template", template="morning_routine")
+   - "Run my dev setup" → workflow_operations(action="run", name="dev_setup")
+
+2. SMART SEARCH: Unified search across everything
+   - "Find files about project" → smart_search(action="files", query="project")
+   - "Search for apps" → smart_search(action="apps", query="code")
+
+3. SYSTEM INSIGHTS: AI-powered analysis
+   - "Check system health" → system_insights(action="health_check")
+   - "Give me recommendations" → system_insights(action="recommendations")
+   - "Security scan" → system_insights(action="security_scan")
+   - "Find resource hogs" → system_insights(action="resource_hogs")
+
+4. MEMORY: Remember user preferences
+   - "Remember my project is X" → context_memory(action="remember", key="project", value="X")
+   - "Add favorite command" → context_memory(action="add_favorite", name="status", command="system status")
 
 INSTRUCTIONS:
-1. Use tools to get real system information - never make up data
-2. For documents/notes: use document_operations (create_note for quick notes, create_from_template for meeting notes/todos)
-3. For spreadsheets/Excel: use spreadsheet_operations (create_excel, create_data_entry, create_template)
-4. To open apps: use app_control with action="launch" and app_name
-5. Keep responses focused and use ONE tool at a time
+1. Use tools to get real data - never make up information
+2. Use ONE tool at a time for clarity
+3. Proactively suggest optimizations and workflows
+4. Remember context across sessions with context_memory
 
-COMMON TASKS:
-- "Create a note" → document_operations(action="create_note", content="...", title="...")
-- "Make an Excel sheet" → spreadsheet_operations(action="create_excel", headers=[...], data=[...])
-- "Create data entry form" → spreadsheet_operations(action="create_data_entry", fields=[...])
-- "Open Notepad/Notes" → app_control(action="launch", app_name="notepad") or app_control(action="launch", app_name="Notes")
-- "Create budget" → spreadsheet_operations(action="create_template", template="budget")
-- "Take a meeting note" → document_operations(action="create_from_template", template="meeting", title="...")
-
-Be direct and helpful. Always use real data from tools."""
+Be intelligent, proactive, and helpful. You have complete control over the machine."""
 
         return create_react_agent(
             model=self.llm,

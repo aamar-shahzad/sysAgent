@@ -28,9 +28,13 @@ class MainWindow:
         self.current_theme = "dark"
         self.agent = None
         self.chat_interface = None
+        self.command_palette = None
+        self.proactive_agent = None
         self._initialize_agent()
         self._create_window()
         self._create_menu()
+        self._setup_keyboard_shortcuts()
+        self._setup_proactive_agent()
         self._create_content()
 
     def _initialize_agent(self):
@@ -121,6 +125,159 @@ class MainWindow:
         help_menu.add_command(label="Keyboard Shortcuts", command=self._show_shortcuts)
         help_menu.add_separator()
         help_menu.add_command(label="About", command=self._show_about)
+
+    def _setup_keyboard_shortcuts(self):
+        """Setup global keyboard shortcuts."""
+        # Command palette: Ctrl+K or Cmd+K
+        self.root.bind("<Control-k>", lambda e: self._toggle_command_palette())
+        self.root.bind("<Command-k>", lambda e: self._toggle_command_palette())
+        
+        # Quick actions
+        self.root.bind("<Control-n>", lambda e: self._new_chat())
+        self.root.bind("<Control-d>", lambda e: self._show_dashboard())
+        self.root.bind("<Control-s>", lambda e: self._show_settings())
+        self.root.bind("<Control-t>", lambda e: self._show_terminal())
+        self.root.bind("<Control-q>", lambda e: self._on_exit())
+        
+        # Quick insights
+        self.root.bind("<Control-i>", lambda e: self._quick_insights())
+
+    def _setup_proactive_agent(self):
+        """Setup the proactive agent for intelligent suggestions."""
+        try:
+            from .proactive_agent import ProactiveAgent
+            self.proactive_agent = ProactiveAgent(callback=self._on_proactive_suggestion)
+            self.proactive_agent.start()
+        except Exception as e:
+            print(f"Warning: Could not initialize proactive agent: {e}")
+            self.proactive_agent = None
+
+    def _on_proactive_suggestion(self, suggestion):
+        """Handle a proactive suggestion from the agent."""
+        if not suggestion or suggestion.dismissed:
+            return
+        
+        # Show suggestion in a non-intrusive way
+        try:
+            self._show_suggestion_toast(suggestion)
+        except Exception:
+            pass
+
+    def _show_suggestion_toast(self, suggestion):
+        """Show a suggestion as a toast notification."""
+        if not hasattr(self, 'toast_frame'):
+            return
+        
+        if USE_CUSTOMTKINTER:
+            toast = ctk.CTkFrame(
+                self.root,
+                fg_color="#2d2d2d",
+                corner_radius=10
+            )
+            toast.place(relx=0.98, rely=0.02, anchor="ne")
+            
+            # Icon and title
+            header = ctk.CTkFrame(toast, fg_color="transparent")
+            header.pack(fill="x", padx=10, pady=(10, 5))
+            
+            ctk.CTkLabel(
+                header,
+                text=f"{suggestion.icon} {suggestion.title}",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                text_color="white"
+            ).pack(side="left")
+            
+            # Close button
+            close_btn = ctk.CTkButton(
+                header,
+                text="×",
+                width=20,
+                height=20,
+                command=toast.destroy,
+                fg_color="transparent",
+                hover_color="#444"
+            )
+            close_btn.pack(side="right")
+            
+            # Message
+            ctk.CTkLabel(
+                toast,
+                text=suggestion.message,
+                font=ctk.CTkFont(size=11),
+                text_color="#aaa",
+                wraplength=250
+            ).pack(padx=10, pady=5)
+            
+            # Action button if available
+            if suggestion.action:
+                action_btn = ctk.CTkButton(
+                    toast,
+                    text="Do it",
+                    width=60,
+                    height=25,
+                    command=lambda: self._execute_suggestion(suggestion, toast),
+                    fg_color="#4a9eff"
+                )
+                action_btn.pack(pady=(0, 10))
+            
+            # Auto-dismiss after 10 seconds
+            toast.after(10000, lambda: toast.destroy() if toast.winfo_exists() else None)
+
+    def _execute_suggestion(self, suggestion, toast):
+        """Execute a proactive suggestion."""
+        if toast and hasattr(toast, 'winfo_exists') and toast.winfo_exists():
+            toast.destroy()
+        
+        if suggestion.action and self.chat_interface:
+            # Send the action as a chat message
+            self._show_chat()
+            self.chat_interface._send_message_direct(suggestion.action)
+
+    def _toggle_command_palette(self):
+        """Toggle the command palette."""
+        try:
+            from .command_palette import CommandPalette
+            
+            if self.command_palette is None:
+                self.command_palette = CommandPalette(
+                    self.root,
+                    on_command=self._on_palette_command
+                )
+            
+            if self.command_palette.is_open:
+                self.command_palette.close()
+            else:
+                self.command_palette.open()
+        except Exception as e:
+            print(f"Warning: Could not open command palette: {e}")
+
+    def _on_palette_command(self, command: str):
+        """Handle a command from the command palette."""
+        if command and self.chat_interface:
+            # Switch to chat if not already there
+            if self.current_view != "chat":
+                self._show_chat()
+                # Need to wait for chat to be ready
+                self.root.after(100, lambda: self._send_palette_command(command))
+            else:
+                self._send_palette_command(command)
+
+    def _send_palette_command(self, command: str):
+        """Send command from palette to chat."""
+        if self.chat_interface:
+            # Add the command to the input and send
+            self.chat_interface.input_field.delete(0, "end")
+            self.chat_interface.input_field.insert(0, command)
+            self.chat_interface._send_message()
+
+    def _quick_insights(self):
+        """Show quick system insights."""
+        if self.chat_interface:
+            if self.current_view != "chat":
+                self._show_chat()
+                self.root.after(100, lambda: self._send_palette_command("Give me quick system insights"))
+            else:
+                self._send_palette_command("Give me quick system insights")
 
     def _set_theme(self, theme: str):
         """Set the application theme."""
@@ -217,6 +374,9 @@ class MainWindow:
             chat_container = ctk.CTkFrame(main_container)
             chat_container.pack(side="right", fill="both", expand=True)
             
+            # Quick actions bar at top
+            self._create_quick_actions_bar(chat_container)
+            
             # Create chat interface
             from .chat import ChatInterface
             self.chat_interface = ChatInterface(chat_container, on_send=self._on_chat_message)
@@ -245,6 +405,101 @@ class MainWindow:
             
             from .chat import ChatInterface
             self.chat_interface = ChatInterface(chat_container, on_send=self._on_chat_message)
+
+    def _create_quick_actions_bar(self, parent):
+        """Create a quick actions bar for common commands."""
+        if USE_CUSTOMTKINTER:
+            bar = ctk.CTkFrame(parent, height=50, fg_color="#2d2d2d")
+            bar.pack(fill="x", padx=0, pady=0)
+            bar.pack_propagate(False)
+            
+            # Left side - Command palette button
+            left_frame = ctk.CTkFrame(bar, fg_color="transparent")
+            left_frame.pack(side="left", padx=10)
+            
+            palette_btn = ctk.CTkButton(
+                left_frame,
+                text="⌘K Command Palette",
+                command=self._toggle_command_palette,
+                width=160,
+                height=30,
+                fg_color="#3d3d3d",
+                hover_color="#4d4d4d",
+                font=ctk.CTkFont(size=12)
+            )
+            palette_btn.pack(side="left", padx=5)
+            
+            # Center - Quick action buttons
+            center_frame = ctk.CTkFrame(bar, fg_color="transparent")
+            center_frame.pack(side="left", padx=20)
+            
+            quick_actions = [
+                ("🏥 Health", "Check system health"),
+                ("📊 Status", "Show system status"),
+                ("🔍 Search", "Search for files named "),
+                ("⚡ Insights", "Give me quick insights"),
+            ]
+            
+            for text, action in quick_actions:
+                btn = ctk.CTkButton(
+                    center_frame,
+                    text=text,
+                    command=lambda a=action: self._quick_action(a),
+                    width=90,
+                    height=28,
+                    fg_color="#3d3d3d",
+                    hover_color="#4d4d4d",
+                    font=ctk.CTkFont(size=11)
+                )
+                btn.pack(side="left", padx=3)
+            
+            # Right side - Workflow dropdown
+            right_frame = ctk.CTkFrame(bar, fg_color="transparent")
+            right_frame.pack(side="right", padx=10)
+            
+            workflow_btn = ctk.CTkButton(
+                right_frame,
+                text="▶ Workflows",
+                command=self._show_workflow_menu,
+                width=100,
+                height=28,
+                fg_color="#4a9eff",
+                hover_color="#3a8eef",
+                font=ctk.CTkFont(size=11)
+            )
+            workflow_btn.pack(side="right", padx=5)
+
+    def _quick_action(self, action: str):
+        """Execute a quick action."""
+        if self.chat_interface:
+            self.chat_interface.input_field.delete(0, "end")
+            self.chat_interface.input_field.insert(0, action)
+            if not action.endswith(" "):
+                self.chat_interface._send_message()
+            else:
+                self.chat_interface.input_field.focus_set()
+
+    def _show_workflow_menu(self):
+        """Show workflow menu."""
+        if USE_CUSTOMTKINTER:
+            menu = tk.Menu(self.root, tearoff=0)
+            
+            menu.add_command(label="▶ Morning Routine", command=lambda: self._run_workflow("morning_routine"))
+            menu.add_command(label="▶ Dev Setup", command=lambda: self._run_workflow("dev_setup"))
+            menu.add_command(label="▶ System Maintenance", command=lambda: self._run_workflow("system_maintenance"))
+            menu.add_command(label="▶ End of Day", command=lambda: self._run_workflow("end_of_day"))
+            menu.add_separator()
+            menu.add_command(label="📋 List Workflows", command=lambda: self._quick_action("List all my workflows"))
+            menu.add_command(label="➕ Create Workflow", command=lambda: self._quick_action("Create a new workflow named "))
+            
+            try:
+                menu.tk_popup(self.root.winfo_pointerx(), self.root.winfo_pointery())
+            finally:
+                menu.grab_release()
+
+    def _run_workflow(self, workflow_name: str):
+        """Run a predefined workflow."""
+        self._quick_action(f"Run the {workflow_name.replace('_', ' ')} workflow")
 
     def _on_chat_message(self, message: str):
         """Handle chat message from user with streaming support."""
