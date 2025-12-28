@@ -455,7 +455,94 @@ class LangGraphAgent:
             except Exception as e:
                 return f"Error performing low-level OS operations: {str(e)}"
 
-        tools.extend([file_operations, system_info, process_management, network_diagnostics, system_control, generate_code, security_operations, automation_operations, monitoring_operations, os_intelligence, low_level_os])
+        # Document operations tool
+        @tool
+        def document_operations(action: str, path: str = None, content: str = None, 
+                               title: str = None, template: str = None) -> str:
+            """Create and manage documents, notes, and text files. Actions: create, create_note, edit, read, open, list_notes, search_notes, create_from_template."""
+            try:
+                if not self.permission_manager.has_permission("file_access"):
+                    return "PERMISSION_REQUEST:file_access:document_operations:Permission required for document access"
+                
+                params = {"action": action}
+                if path: params["path"] = path
+                if content: params["content"] = content
+                if title: params["title"] = title
+                if template: params["template"] = template
+                
+                result = self.tool_executor.execute_tool("document_tool", **params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error with documents: {str(e)}"
+
+        # Spreadsheet operations tool
+        @tool
+        def spreadsheet_operations(action: str, path: str = None, headers: list = None,
+                                   data: list = None, template: str = None, title: str = None) -> str:
+            """Create and manage spreadsheets (Excel/CSV). Actions: create, create_excel, read, write_row, create_data_entry, create_template (budget/inventory/timesheet/contacts/expenses)."""
+            try:
+                if not self.permission_manager.has_permission("file_access"):
+                    return "PERMISSION_REQUEST:file_access:spreadsheet_operations:Permission required for spreadsheet access"
+                
+                params = {"action": action}
+                if path: params["path"] = path
+                if headers: params["headers"] = headers
+                if data: params["data"] = data
+                if template: params["template"] = template
+                if title: params["title"] = title
+                
+                result = self.tool_executor.execute_tool("spreadsheet_tool", **params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error with spreadsheet: {str(e)}"
+
+        # Application control tool
+        @tool
+        def app_control(action: str, app_name: str = None, path: str = None) -> str:
+            """Launch, close, and manage applications. Actions: launch, close, list, list_running, focus, info, find."""
+            try:
+                if not self.permission_manager.has_permission("app_control"):
+                    permission_granted = interrupt("Permission required for app control. Grant? (y/n): ")
+                    if permission_granted.lower() in ['y', 'yes']:
+                        self.permission_manager.grant_permission("app_control")
+                    else:
+                        return "Permission denied"
+                
+                params = {"action": action}
+                if app_name: params["app_name"] = app_name
+                if path: params["path"] = path
+                
+                result = self.tool_executor.execute_tool("app_tool", **params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error with app control: {str(e)}"
+
+        # Clipboard tool
+        @tool
+        def clipboard_operations(action: str, text: str = None) -> str:
+            """Clipboard operations. Actions: copy, paste, clear, history."""
+            try:
+                if not self.permission_manager.has_permission("clipboard"):
+                    permission_granted = interrupt("Permission required for clipboard. Grant? (y/n): ")
+                    if permission_granted.lower() in ['y', 'yes']:
+                        self.permission_manager.grant_permission("clipboard")
+                    else:
+                        return "Permission denied"
+                
+                params = {"action": action}
+                if text: params["text"] = text
+                
+                result = self.tool_executor.execute_tool("clipboard_tool", **params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error with clipboard: {str(e)}"
+
+        tools.extend([
+            file_operations, system_info, process_management, network_diagnostics, 
+            system_control, generate_code, security_operations, automation_operations, 
+            monitoring_operations, os_intelligence, low_level_os,
+            document_operations, spreadsheet_operations, app_control, clipboard_operations
+        ])
         return tools
 
     def _register_tools_with_executor(self):
@@ -463,7 +550,8 @@ class LangGraphAgent:
         from ..tools import (
             FileTool, SystemInfoTool, ProcessTool, NetworkTool, 
             SystemControlTool, CodeGenerationTool, SecurityTool, 
-            AutomationTool, MonitoringTool, OSIntelligenceTool, LowLevelOSTool
+            AutomationTool, MonitoringTool, OSIntelligenceTool, LowLevelOSTool,
+            DocumentTool, SpreadsheetTool, AppTool, ClipboardTool
         )
         
         # Register all tools
@@ -478,7 +566,11 @@ class LangGraphAgent:
             AutomationTool(),
             MonitoringTool(),
             OSIntelligenceTool(),
-            LowLevelOSTool()
+            LowLevelOSTool(),
+            DocumentTool(),
+            SpreadsheetTool(),
+            AppTool(),
+            ClipboardTool(),
         ]
         
         for tool in tools_to_register:
@@ -486,43 +578,41 @@ class LangGraphAgent:
 
     def _create_react_agent(self):
         """Create the React agent using langgraph.prebuilt."""
-        system_prompt = """You are SysAgent, an intelligent command-line assistant that can interact with the operating system using natural language.
+        system_prompt = """You are SysAgent, an intelligent assistant that controls the operating system using natural language.
 
-You have access to the following tools:
-- file_operations: Perform file system operations (list, read, write, delete files and directories)
-- system_info: Get system information and metrics (CPU, memory, disk usage, OS info)
-- process_management: Manage system processes (list, kill, monitor processes)
-- network_diagnostics: Perform network diagnostics (ping, port scan, connectivity tests)
-- system_control: Control system services, power management, user management, and system configuration
-- generate_code: Generate and execute Python code for custom solutions when no specific tool exists
-- security_operations: Perform security audits, vulnerability scanning, and security monitoring
-- automation_operations: Schedule tasks, create workflows, and automate system operations
-- monitoring_operations: Monitor system resources, performance metrics, and create alerts
-- os_intelligence: Advanced OS-level intelligence, predictive analysis, smart automation, and system optimization
-- low_level_os: Direct low-level OS access, system calls, kernel interfaces, and real-time hardware data
+TOOLS AVAILABLE:
+- file_operations: File system operations (list, read, write, delete)
+- system_info: System metrics (CPU, memory, disk, OS info)
+- process_management: Process control (list, kill, monitor)
+- network_diagnostics: Network tools (ping, port scan, connectivity)
+- system_control: Services, power, user management
+- generate_code: Execute Python code for custom tasks
+- security_operations: Security audits and monitoring
+- automation_operations: Task scheduling and workflows
+- monitoring_operations: Resource monitoring and alerts
+- os_intelligence: Advanced OS analysis and optimization
+- low_level_os: Low-level OS access and hardware data
+- document_operations: Create/edit documents, notes, text files (use for Notepad, Notes, text docs)
+- spreadsheet_operations: Create Excel/CSV files, data entry forms, budgets, inventories
+- app_control: Launch/close applications (Excel, Notepad, browsers, etc.)
+- clipboard_operations: Copy/paste clipboard operations
 
-CRITICAL INSTRUCTIONS:
-1. ALWAYS use the tools to get real system information
-2. When a tool returns data, ALWAYS present that data to the user
-3. If a tool returns None for a specific field (like temperature), that means the system doesn't support it - show the other data that WAS retrieved
-4. NEVER make up or generate fake data
-5. When a tool succeeds, show the user the actual data returned
-6. If a tool fails, report the actual error, don't make up a response
-7. Be direct and helpful, but always truthful about the actual system state
-8. For complex requests, use ONE tool at a time and provide the result before proceeding
-9. Avoid chaining multiple tool calls in a single response to prevent recursion issues
-10. If asked for a comprehensive report, use system_info with action="overview" for a complete system snapshot
+INSTRUCTIONS:
+1. Use tools to get real system information - never make up data
+2. For documents/notes: use document_operations (create_note for quick notes, create_from_template for meeting notes/todos)
+3. For spreadsheets/Excel: use spreadsheet_operations (create_excel, create_data_entry, create_template)
+4. To open apps: use app_control with action="launch" and app_name
+5. Keep responses focused and use ONE tool at a time
 
-EXAMPLES OF CORRECT BEHAVIOR:
-- If system_info returns CPU data with temperature=None, say: "Here's your CPU information: [show the actual data] Note: Temperature monitoring is not available on this system."
-- If system_info returns memory data, say: "Here's your memory information: [show the actual data]"
-- If a tool fails, say: "The tool encountered an error: [actual error message]"
-- For file operations, use file_operations tool directly
-- For comprehensive system reports, use system_info with action="overview"
+COMMON TASKS:
+- "Create a note" → document_operations(action="create_note", content="...", title="...")
+- "Make an Excel sheet" → spreadsheet_operations(action="create_excel", headers=[...], data=[...])
+- "Create data entry form" → spreadsheet_operations(action="create_data_entry", fields=[...])
+- "Open Notepad/Notes" → app_control(action="launch", app_name="notepad") or app_control(action="launch", app_name="Notes")
+- "Create budget" → spreadsheet_operations(action="create_template", template="budget")
+- "Take a meeting note" → document_operations(action="create_from_template", template="meeting", title="...")
 
-IMPORTANT: If a tool requires permission, the system will automatically ask the user for permission using interrupt(). Always proceed with the tool call - the permission system will handle the user interaction.
-
-Be direct and helpful in your responses, but always use real data from the tools and show the user what was actually retrieved. Keep responses focused and avoid excessive tool chaining."""
+Be direct and helpful. Always use real data from tools."""
 
         return create_react_agent(
             model=self.llm,
