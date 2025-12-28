@@ -51,6 +51,18 @@ try:
 except ImportError:
     DEEP_AGENT_AVAILABLE = False
 
+try:
+    from ..core.context_awareness import get_context_awareness, Suggestion
+    CONTEXT_AWARE_AVAILABLE = True
+except ImportError:
+    CONTEXT_AWARE_AVAILABLE = False
+
+try:
+    from ..core.task_templates import get_template_manager, TaskTemplate
+    TEMPLATES_AVAILABLE = True
+except ImportError:
+    TEMPLATES_AVAILABLE = False
+
 
 # Theme definitions
 THEMES = {
@@ -319,9 +331,18 @@ class MainWindow:
             ("🖥️", "Terminal", self._show_terminal, "terminal"),
         ])
         
+        # Smart Features section
+        self._create_nav_section(sidebar, "SMART FEATURES", [
+            ("💡", "Suggestions", self._show_suggestions, "suggestions"),
+            ("📋", "Templates", self._show_templates, "templates"),
+            ("🎯", "Quick Launcher", self._show_quick_launcher, None),
+            ("⏺️", "Macros", self._show_macros, "macros"),
+        ])
+        
         # Utility section
         self._create_nav_section(sidebar, "UTILITIES", [
             ("📤", "Export", self._show_export_dialog, None),
+            ("🖼️", "Floating Mode", self._toggle_floating_mode, None),
             ("❓", "Help", self._show_help, None),
         ])
         
@@ -2204,6 +2225,690 @@ class MainWindow:
         
         self.terminal_output.see("end")
     
+    def _show_suggestions(self):
+        """Show context-aware suggestions panel."""
+        if not USE_CUSTOMTKINTER:
+            return
+        
+        # Clear current view
+        for widget in self.content_area.winfo_children():
+            widget.destroy()
+        
+        # Create suggestions panel
+        panel = ctk.CTkFrame(self.content_area, fg_color=COLORS["bg"])
+        panel.pack(fill="both", expand=True)
+        
+        # Header
+        header = ctk.CTkFrame(panel, fg_color=COLORS["bg_secondary"])
+        header.pack(fill="x")
+        
+        ctk.CTkLabel(
+            header,
+            text="💡 Smart Suggestions",
+            font=ctk.CTkFont(size=18, weight="bold")
+        ).pack(side="left", padx=16, pady=16)
+        
+        ctk.CTkButton(
+            header,
+            text="🔄 Refresh",
+            width=100,
+            height=32,
+            corner_radius=6,
+            fg_color=COLORS["accent"],
+            command=self._refresh_suggestions
+        ).pack(side="right", padx=16, pady=16)
+        
+        # Suggestions content
+        self.suggestions_frame = ctk.CTkScrollableFrame(panel, fg_color=COLORS["bg"])
+        self.suggestions_frame.pack(fill="both", expand=True, padx=16, pady=16)
+        
+        self._refresh_suggestions()
+    
+    def _refresh_suggestions(self):
+        """Refresh suggestions based on current context."""
+        if not hasattr(self, 'suggestions_frame'):
+            return
+        
+        # Clear existing
+        for widget in self.suggestions_frame.winfo_children():
+            widget.destroy()
+        
+        suggestions = []
+        
+        # Get context-aware suggestions if available
+        if CONTEXT_AWARE_AVAILABLE:
+            try:
+                ctx = get_context_awareness()
+                suggestions = ctx.get_suggestions(limit=10)
+            except Exception:
+                pass
+        
+        # If no suggestions, show defaults
+        if not suggestions:
+            default_suggestions = [
+                ("📊", "System Status", "show system status", "general"),
+                ("🔍", "Search Files", "search files", "files"),
+                ("📸", "Screenshot", "take a screenshot", "media"),
+                ("💻", "Open Terminal", "open terminal", "apps"),
+                ("📝", "New Note", "create a note", "productivity"),
+            ]
+            for icon, text, cmd, cat in default_suggestions:
+                self._add_suggestion_card(icon, text, cmd, cat)
+        else:
+            for s in suggestions:
+                self._add_suggestion_card(s.icon, s.text, s.command, s.context_match)
+    
+    def _add_suggestion_card(self, icon: str, text: str, command: str, context: str):
+        """Add a suggestion card to the panel."""
+        card = ctk.CTkFrame(
+            self.suggestions_frame,
+            fg_color=COLORS["bg_secondary"],
+            corner_radius=8
+        )
+        card.pack(fill="x", pady=4)
+        
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.pack(fill="x", padx=12, pady=10)
+        
+        # Icon and text
+        left = ctk.CTkFrame(inner, fg_color="transparent")
+        left.pack(side="left", fill="x", expand=True)
+        
+        ctk.CTkLabel(
+            left,
+            text=f"{icon} {text}",
+            font=ctk.CTkFont(size=14, weight="bold")
+        ).pack(anchor="w")
+        
+        if context:
+            ctk.CTkLabel(
+                left,
+                text=f"Based on: {context}",
+                font=ctk.CTkFont(size=11),
+                text_color=COLORS["text_muted"]
+            ).pack(anchor="w")
+        
+        # Run button
+        ctk.CTkButton(
+            inner,
+            text="Run",
+            width=60,
+            height=28,
+            corner_radius=6,
+            fg_color=COLORS["accent"],
+            command=lambda c=command: self._quick_action(c)
+        ).pack(side="right")
+    
+    def _show_templates(self):
+        """Show task templates panel."""
+        if not USE_CUSTOMTKINTER:
+            return
+        
+        # Clear current view
+        for widget in self.content_area.winfo_children():
+            widget.destroy()
+        
+        panel = ctk.CTkFrame(self.content_area, fg_color=COLORS["bg"])
+        panel.pack(fill="both", expand=True)
+        
+        # Header
+        header = ctk.CTkFrame(panel, fg_color=COLORS["bg_secondary"])
+        header.pack(fill="x")
+        
+        ctk.CTkLabel(
+            header,
+            text="📋 Task Templates",
+            font=ctk.CTkFont(size=18, weight="bold")
+        ).pack(side="left", padx=16, pady=16)
+        
+        ctk.CTkButton(
+            header,
+            text="+ New Template",
+            width=120,
+            height=32,
+            corner_radius=6,
+            fg_color=COLORS["accent"],
+            command=self._create_template_dialog
+        ).pack(side="right", padx=16, pady=16)
+        
+        # Category filter
+        filter_frame = ctk.CTkFrame(panel, fg_color="transparent")
+        filter_frame.pack(fill="x", padx=16, pady=(16, 8))
+        
+        ctk.CTkLabel(
+            filter_frame,
+            text="Category:",
+            font=ctk.CTkFont(size=12)
+        ).pack(side="left")
+        
+        categories = ["All", "productivity", "system", "development", "security", "media"]
+        self.template_category = ctk.CTkOptionMenu(
+            filter_frame,
+            values=categories,
+            command=self._filter_templates
+        )
+        self.template_category.pack(side="left", padx=8)
+        
+        # Templates list
+        self.templates_frame = ctk.CTkScrollableFrame(panel, fg_color=COLORS["bg"])
+        self.templates_frame.pack(fill="both", expand=True, padx=16, pady=8)
+        
+        self._load_templates()
+    
+    def _load_templates(self, category: str = None):
+        """Load and display templates."""
+        if not hasattr(self, 'templates_frame'):
+            return
+        
+        # Clear existing
+        for widget in self.templates_frame.winfo_children():
+            widget.destroy()
+        
+        templates = []
+        
+        if TEMPLATES_AVAILABLE:
+            try:
+                tm = get_template_manager()
+                templates = tm.list_templates(category if category and category != "All" else None)
+            except Exception:
+                pass
+        
+        if not templates:
+            ctk.CTkLabel(
+                self.templates_frame,
+                text="No templates found. Create one to get started!",
+                text_color=COLORS["text_muted"]
+            ).pack(pady=20)
+            return
+        
+        for template in templates:
+            self._add_template_card(template)
+    
+    def _add_template_card(self, template):
+        """Add a template card."""
+        card = ctk.CTkFrame(
+            self.templates_frame,
+            fg_color=COLORS["bg_secondary"],
+            corner_radius=8
+        )
+        card.pack(fill="x", pady=4)
+        
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.pack(fill="x", padx=12, pady=10)
+        
+        # Left side
+        left = ctk.CTkFrame(inner, fg_color="transparent")
+        left.pack(side="left", fill="x", expand=True)
+        
+        title_row = ctk.CTkFrame(left, fg_color="transparent")
+        title_row.pack(anchor="w")
+        
+        ctk.CTkLabel(
+            title_row,
+            text=f"{template.icon} {template.name}",
+            font=ctk.CTkFont(size=14, weight="bold")
+        ).pack(side="left")
+        
+        if template.is_builtin:
+            ctk.CTkLabel(
+                title_row,
+                text="Built-in",
+                font=ctk.CTkFont(size=10),
+                text_color=COLORS["accent"]
+            ).pack(side="left", padx=8)
+        
+        ctk.CTkLabel(
+            left,
+            text=template.description,
+            font=ctk.CTkFont(size=11),
+            text_color=COLORS["text_muted"]
+        ).pack(anchor="w")
+        
+        ctk.CTkLabel(
+            left,
+            text=f"{len(template.steps)} steps • {template.category}",
+            font=ctk.CTkFont(size=10),
+            text_color=COLORS["text_muted"]
+        ).pack(anchor="w")
+        
+        # Right side - buttons
+        buttons = ctk.CTkFrame(inner, fg_color="transparent")
+        buttons.pack(side="right")
+        
+        ctk.CTkButton(
+            buttons,
+            text="▶ Run",
+            width=60,
+            height=28,
+            corner_radius=6,
+            fg_color=COLORS["success"],
+            command=lambda t=template: self._run_template(t)
+        ).pack(side="left", padx=2)
+        
+        ctk.CTkButton(
+            buttons,
+            text="👁",
+            width=32,
+            height=28,
+            corner_radius=6,
+            fg_color=COLORS["bg_tertiary"],
+            command=lambda t=template: self._view_template(t)
+        ).pack(side="left", padx=2)
+    
+    def _filter_templates(self, category: str):
+        """Filter templates by category."""
+        self._load_templates(category)
+    
+    def _run_template(self, template):
+        """Run a task template."""
+        # Show confirmation
+        if messagebox.askyesno(
+            "Run Template",
+            f"Run '{template.name}'?\n\nThis will execute {len(template.steps)} steps."
+        ):
+            # Switch to chat and run each step
+            self._show_chat()
+            
+            def run_steps():
+                for step in template.steps:
+                    if step.wait_ms > 0:
+                        time.sleep(step.wait_ms / 1000)
+                    self._quick_action(step.command)
+                    time.sleep(0.5)  # Brief pause between steps
+            
+            threading.Thread(target=run_steps, daemon=True).start()
+    
+    def _view_template(self, template):
+        """View template details."""
+        popup = ctk.CTkToplevel(self.root)
+        popup.title(f"Template: {template.name}")
+        popup.geometry("450x400")
+        popup.transient(self.root)
+        popup.configure(fg_color=COLORS["bg"])
+        
+        # Header
+        header = ctk.CTkFrame(popup, fg_color=COLORS["bg_secondary"])
+        header.pack(fill="x")
+        
+        ctk.CTkLabel(
+            header,
+            text=f"{template.icon} {template.name}",
+            font=ctk.CTkFont(size=16, weight="bold")
+        ).pack(pady=12)
+        
+        # Description
+        ctk.CTkLabel(
+            popup,
+            text=template.description,
+            font=ctk.CTkFont(size=12),
+            text_color=COLORS["text_muted"],
+            wraplength=400
+        ).pack(padx=16, pady=8)
+        
+        # Steps
+        ctk.CTkLabel(
+            popup,
+            text="Steps:",
+            font=ctk.CTkFont(size=12, weight="bold")
+        ).pack(anchor="w", padx=16, pady=(8, 4))
+        
+        steps_frame = ctk.CTkScrollableFrame(popup, fg_color=COLORS["bg"])
+        steps_frame.pack(fill="both", expand=True, padx=16, pady=8)
+        
+        for i, step in enumerate(template.steps, 1):
+            step_frame = ctk.CTkFrame(steps_frame, fg_color=COLORS["bg_secondary"], corner_radius=6)
+            step_frame.pack(fill="x", pady=2)
+            
+            inner = ctk.CTkFrame(step_frame, fg_color="transparent")
+            inner.pack(fill="x", padx=10, pady=8)
+            
+            ctk.CTkLabel(
+                inner,
+                text=f"{i}. {step.name}",
+                font=ctk.CTkFont(size=12, weight="bold")
+            ).pack(anchor="w")
+            
+            ctk.CTkLabel(
+                inner,
+                text=step.command,
+                font=ctk.CTkFont(size=11),
+                text_color=COLORS["text_muted"]
+            ).pack(anchor="w")
+    
+    def _create_template_dialog(self):
+        """Show dialog to create a new template."""
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("Create Template")
+        popup.geometry("500x550")
+        popup.transient(self.root)
+        popup.configure(fg_color=COLORS["bg"])
+        
+        # Header
+        header = ctk.CTkFrame(popup, fg_color=COLORS["bg_secondary"])
+        header.pack(fill="x")
+        
+        ctk.CTkLabel(
+            header,
+            text="📋 Create New Template",
+            font=ctk.CTkFont(size=16, weight="bold")
+        ).pack(pady=12)
+        
+        # Form
+        form = ctk.CTkScrollableFrame(popup, fg_color=COLORS["bg"])
+        form.pack(fill="both", expand=True, padx=16, pady=16)
+        
+        # Name
+        ctk.CTkLabel(form, text="Name:").pack(anchor="w", pady=(0, 4))
+        name_entry = ctk.CTkEntry(form, width=400)
+        name_entry.pack(fill="x", pady=(0, 8))
+        
+        # Description
+        ctk.CTkLabel(form, text="Description:").pack(anchor="w", pady=(0, 4))
+        desc_entry = ctk.CTkEntry(form, width=400)
+        desc_entry.pack(fill="x", pady=(0, 8))
+        
+        # Category
+        ctk.CTkLabel(form, text="Category:").pack(anchor="w", pady=(0, 4))
+        category_menu = ctk.CTkOptionMenu(
+            form,
+            values=["productivity", "system", "development", "security", "media", "custom"]
+        )
+        category_menu.pack(anchor="w", pady=(0, 8))
+        
+        # Icon
+        ctk.CTkLabel(form, text="Icon (emoji):").pack(anchor="w", pady=(0, 4))
+        icon_entry = ctk.CTkEntry(form, width=100)
+        icon_entry.insert(0, "📋")
+        icon_entry.pack(anchor="w", pady=(0, 8))
+        
+        # Steps
+        ctk.CTkLabel(
+            form,
+            text="Steps (one per line, format: name|command):"
+        ).pack(anchor="w", pady=(8, 4))
+        
+        steps_text = ctk.CTkTextbox(form, height=150)
+        steps_text.pack(fill="x", pady=(0, 8))
+        steps_text.insert("1.0", "Open App|open application\nDo Something|run command")
+        
+        # Buttons
+        buttons = ctk.CTkFrame(popup, fg_color="transparent")
+        buttons.pack(fill="x", padx=16, pady=16)
+        
+        def save_template():
+            name = name_entry.get().strip()
+            if not name:
+                messagebox.showerror("Error", "Name is required")
+                return
+            
+            steps = []
+            for line in steps_text.get("1.0", "end").strip().split("\n"):
+                if "|" in line:
+                    parts = line.split("|", 1)
+                    steps.append({
+                        "name": parts[0].strip(),
+                        "command": parts[1].strip()
+                    })
+            
+            if TEMPLATES_AVAILABLE:
+                try:
+                    tm = get_template_manager()
+                    tm.create_template(
+                        name=name,
+                        description=desc_entry.get(),
+                        category=category_menu.get(),
+                        steps=steps,
+                        icon=icon_entry.get() or "📋"
+                    )
+                    popup.destroy()
+                    self._load_templates()
+                    self._safe_show_toast("Template created!", "success")
+                except Exception as e:
+                    messagebox.showerror("Error", str(e))
+        
+        ctk.CTkButton(
+            buttons,
+            text="Create",
+            fg_color=COLORS["success"],
+            command=save_template
+        ).pack(side="right", padx=4)
+        
+        ctk.CTkButton(
+            buttons,
+            text="Cancel",
+            fg_color=COLORS["bg_secondary"],
+            command=popup.destroy
+        ).pack(side="right", padx=4)
+    
+    def _show_quick_launcher(self):
+        """Show the quick launcher."""
+        try:
+            from .floating_widget import QuickLauncher
+            
+            if not hasattr(self, 'quick_launcher') or self.quick_launcher is None:
+                self.quick_launcher = QuickLauncher(
+                    on_command=self._quick_action
+                )
+            
+            self.quick_launcher.show()
+        except ImportError:
+            self._safe_show_toast("Quick launcher not available", "warning")
+    
+    def _show_macros(self):
+        """Show macros panel."""
+        if not USE_CUSTOMTKINTER:
+            return
+        
+        # Clear current view
+        for widget in self.content_area.winfo_children():
+            widget.destroy()
+        
+        panel = ctk.CTkFrame(self.content_area, fg_color=COLORS["bg"])
+        panel.pack(fill="both", expand=True)
+        
+        # Header
+        header = ctk.CTkFrame(panel, fg_color=COLORS["bg_secondary"])
+        header.pack(fill="x")
+        
+        ctk.CTkLabel(
+            header,
+            text="⏺️ Macros",
+            font=ctk.CTkFont(size=18, weight="bold")
+        ).pack(side="left", padx=16, pady=16)
+        
+        # Record button
+        self.macro_record_btn = ctk.CTkButton(
+            header,
+            text="⏺ Record New",
+            width=120,
+            height=32,
+            corner_radius=6,
+            fg_color=COLORS["error"],
+            command=self._toggle_macro_recording
+        )
+        self.macro_record_btn.pack(side="right", padx=16, pady=16)
+        
+        self._is_recording_macro = False
+        
+        # Macros list
+        self.macros_frame = ctk.CTkScrollableFrame(panel, fg_color=COLORS["bg"])
+        self.macros_frame.pack(fill="both", expand=True, padx=16, pady=16)
+        
+        self._load_macros()
+    
+    def _load_macros(self):
+        """Load and display macros."""
+        if not hasattr(self, 'macros_frame'):
+            return
+        
+        for widget in self.macros_frame.winfo_children():
+            widget.destroy()
+        
+        # Try to get macros from tool
+        try:
+            from ..tools.macro_tool import MacroTool
+            macro_tool = MacroTool()
+            result = macro_tool._execute("list")
+            
+            if result.success:
+                macros = result.data.get("macros", [])
+                
+                if not macros:
+                    ctk.CTkLabel(
+                        self.macros_frame,
+                        text="No macros recorded yet. Click 'Record New' to create one!",
+                        text_color=COLORS["text_muted"]
+                    ).pack(pady=20)
+                    return
+                
+                for macro in macros:
+                    self._add_macro_card(macro)
+        except Exception as e:
+            ctk.CTkLabel(
+                self.macros_frame,
+                text=f"Could not load macros: {str(e)}",
+                text_color=COLORS["text_muted"]
+            ).pack(pady=20)
+    
+    def _add_macro_card(self, macro: dict):
+        """Add a macro card."""
+        card = ctk.CTkFrame(
+            self.macros_frame,
+            fg_color=COLORS["bg_secondary"],
+            corner_radius=8
+        )
+        card.pack(fill="x", pady=4)
+        
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.pack(fill="x", padx=12, pady=10)
+        
+        # Left
+        left = ctk.CTkFrame(inner, fg_color="transparent")
+        left.pack(side="left", fill="x", expand=True)
+        
+        ctk.CTkLabel(
+            left,
+            text=f"📹 {macro['name']}",
+            font=ctk.CTkFont(size=14, weight="bold")
+        ).pack(anchor="w")
+        
+        ctk.CTkLabel(
+            left,
+            text=f"{macro.get('steps', 0)} steps • Run count: {macro.get('run_count', 0)}",
+            font=ctk.CTkFont(size=11),
+            text_color=COLORS["text_muted"]
+        ).pack(anchor="w")
+        
+        # Right - buttons
+        buttons = ctk.CTkFrame(inner, fg_color="transparent")
+        buttons.pack(side="right")
+        
+        ctk.CTkButton(
+            buttons,
+            text="▶ Play",
+            width=60,
+            height=28,
+            corner_radius=6,
+            fg_color=COLORS["success"],
+            command=lambda n=macro['name']: self._play_macro(n)
+        ).pack(side="left", padx=2)
+        
+        ctk.CTkButton(
+            buttons,
+            text="🗑",
+            width=32,
+            height=28,
+            corner_radius=6,
+            fg_color=COLORS["error"],
+            command=lambda n=macro['name']: self._delete_macro(n)
+        ).pack(side="left", padx=2)
+    
+    def _toggle_macro_recording(self):
+        """Toggle macro recording."""
+        try:
+            from ..tools.macro_tool import MacroTool
+            macro_tool = MacroTool()
+            
+            if self._is_recording_macro:
+                result = macro_tool._execute("stop_recording")
+                self._is_recording_macro = False
+                self.macro_record_btn.configure(text="⏺ Record New", fg_color=COLORS["error"])
+                self._load_macros()
+                self._safe_show_toast("Macro saved!", "success")
+            else:
+                name = f"macro_{int(time.time())}"
+                result = macro_tool._execute("start_recording", name=name)
+                self._is_recording_macro = True
+                self.macro_record_btn.configure(text="⏹ Stop Recording", fg_color=COLORS["warning"])
+                self._safe_show_toast("Recording macro... Perform your actions!", "info")
+        except Exception as e:
+            self._safe_show_toast(f"Error: {str(e)}", "error")
+    
+    def _play_macro(self, name: str):
+        """Play a macro."""
+        try:
+            from ..tools.macro_tool import MacroTool
+            macro_tool = MacroTool()
+            
+            def play():
+                result = macro_tool._execute("play", name=name)
+                if result.success:
+                    self.root.after(0, lambda: self._safe_show_toast("Macro completed!", "success"))
+                else:
+                    self.root.after(0, lambda: self._safe_show_toast(f"Error: {result.message}", "error"))
+            
+            threading.Thread(target=play, daemon=True).start()
+            self._safe_show_toast(f"Playing macro: {name}", "info")
+        except Exception as e:
+            self._safe_show_toast(f"Error: {str(e)}", "error")
+    
+    def _delete_macro(self, name: str):
+        """Delete a macro."""
+        if messagebox.askyesno("Delete Macro", f"Delete macro '{name}'?"):
+            try:
+                from ..tools.macro_tool import MacroTool
+                macro_tool = MacroTool()
+                macro_tool._execute("delete", name=name)
+                self._load_macros()
+                self._safe_show_toast("Macro deleted", "success")
+            except Exception as e:
+                self._safe_show_toast(f"Error: {str(e)}", "error")
+    
+    def _toggle_floating_mode(self):
+        """Toggle floating widget mode."""
+        try:
+            from .floating_widget import FloatingWidget
+            
+            if hasattr(self, 'floating_widget') and self.floating_widget:
+                try:
+                    self.floating_widget.destroy()
+                except:
+                    pass
+                self.floating_widget = None
+                self._safe_show_toast("Floating mode disabled", "info")
+            else:
+                # Hide main window and show floating widget
+                self.root.withdraw()
+                
+                def on_expand():
+                    self.root.deiconify()
+                    if hasattr(self, 'floating_widget') and self.floating_widget:
+                        try:
+                            self.floating_widget.destroy()
+                        except:
+                            pass
+                        self.floating_widget = None
+                
+                self.floating_widget = FloatingWidget(
+                    on_command=self._quick_action,
+                    on_expand=on_expand
+                )
+                
+                # Run in thread
+                threading.Thread(target=self.floating_widget.run, daemon=True).start()
+        except ImportError:
+            self._safe_show_toast("Floating widget not available", "warning")
+
     def _on_exit(self):
         """Handle exit."""
         if messagebox.askyesno("Exit", "Are you sure you want to exit?"):

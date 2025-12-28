@@ -157,6 +157,131 @@ class DeepAgent:
         except Exception:
             pass
     
+    def chain_of_thought(self, task: str) -> Generator[Dict[str, Any], None, None]:
+        """
+        Execute task using chain-of-thought reasoning.
+        
+        This method:
+        1. Breaks down the task into reasoning steps
+        2. Executes each step with visible reasoning
+        3. Self-corrects if needed
+        4. Provides final summary
+        
+        Yields:
+            Reasoning steps and results
+        """
+        start_time = time.time()
+        
+        # Step 1: Understanding
+        yield {
+            'type': 'reasoning',
+            'step': 'understanding',
+            'content': f"Understanding request: {task}"
+        }
+        
+        # Analyze the task
+        task_lower = task.lower()
+        is_complex = any(word in task_lower for word in ['and', 'then', 'after', 'multiple', 'all'])
+        is_query = any(word in task_lower for word in ['what', 'how', 'why', 'show', 'list', 'get'])
+        is_action = any(word in task_lower for word in ['open', 'close', 'create', 'delete', 'run'])
+        
+        yield {
+            'type': 'reasoning',
+            'step': 'analysis',
+            'content': f"Task type: {'complex multi-step' if is_complex else 'simple'}, "
+                      f"{'query' if is_query else 'action' if is_action else 'mixed'}"
+        }
+        
+        # Step 2: Planning
+        if is_complex:
+            yield {
+                'type': 'reasoning',
+                'step': 'planning',
+                'content': "Breaking down into subtasks..."
+            }
+            
+            plan = self.create_plan(task)
+            
+            yield {
+                'type': 'plan',
+                'subtasks': [{'description': s.description, 'tool': s.tool} for s in plan.subtasks]
+            }
+            
+            # Execute plan
+            for update in self.execute_plan(plan):
+                yield update
+            
+            # Final summary
+            completed = sum(1 for s in plan.subtasks if s.status == TaskStatus.COMPLETED.value)
+            yield {
+                'type': 'reasoning',
+                'step': 'summary',
+                'content': f"Completed {completed}/{len(plan.subtasks)} steps"
+            }
+        else:
+            # Simple task - direct execution
+            yield {
+                'type': 'reasoning',
+                'step': 'execution',
+                'content': "Executing directly..."
+            }
+            
+            try:
+                result = self.base_agent.process_command(task)
+                
+                yield {
+                    'type': 'result',
+                    'success': result.get('success', False),
+                    'message': result.get('message', ''),
+                    'data': result.get('data', {})
+                }
+                
+                # Self-reflection
+                if result.get('success'):
+                    yield {
+                        'type': 'reasoning',
+                        'step': 'reflection',
+                        'content': "Task completed successfully"
+                    }
+                else:
+                    yield {
+                        'type': 'reasoning',
+                        'step': 'reflection',
+                        'content': f"Task encountered issue: {result.get('message', 'unknown')}"
+                    }
+            except Exception as e:
+                yield {
+                    'type': 'error',
+                    'message': str(e)
+                }
+        
+        duration = int((time.time() - start_time) * 1000)
+        yield {
+            'type': 'complete',
+            'duration_ms': duration
+        }
+    
+    def reason_and_act(self, task: str) -> Dict[str, Any]:
+        """
+        ReAct pattern: Reason about task, take action, observe result.
+        
+        This is a synchronous version that returns the final result.
+        """
+        reasoning_trace = []
+        final_result = None
+        
+        for step in self.chain_of_thought(task):
+            reasoning_trace.append(step)
+            if step.get('type') == 'result':
+                final_result = step
+        
+        return {
+            'success': final_result.get('success', False) if final_result else False,
+            'message': final_result.get('message', '') if final_result else 'No result',
+            'reasoning': reasoning_trace,
+            'data': final_result.get('data', {}) if final_result else {}
+        }
+    
     def _save_data(self):
         """Save data to disk."""
         try:
