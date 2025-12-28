@@ -888,6 +888,242 @@ def chat(ctx):
         console.print(f"[red]Error opening chat:[/red] {e}")
 
 
+@cli.command()
+@click.option('--port', '-p', default=8080, help='Port to run the API server on')
+@click.option('--host', '-h', default='localhost', help='Host to bind to')
+@click.option('--no-auth', is_flag=True, help='Disable API authentication (not recommended)')
+@click.pass_context
+def api(ctx, port, host, no_auth):
+    """Start the REST API server for external integration."""
+    console.print(f"[blue]Starting SysAgent API Server on {host}:{port}...[/blue]")
+    try:
+        from ..api.server import start_api_server
+        start_api_server(port=port, require_auth=not no_auth)
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] API dependencies not installed.")
+        console.print(f"[dim]Details: {e}[/dim]")
+    except Exception as e:
+        console.print(f"[red]Error starting API server:[/red] {e}")
+
+
+@cli.command()
+@click.pass_context
+def tray(ctx):
+    """Run SysAgent in system tray mode (background)."""
+    console.print("[blue]Starting SysAgent in system tray mode...[/blue]")
+    try:
+        from ..gui.system_tray import run_tray_mode
+        run_tray_mode()
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] Tray dependencies not installed. Install with: pip install pystray Pillow")
+        console.print(f"[dim]Details: {e}[/dim]")
+    except Exception as e:
+        console.print(f"[red]Error starting tray mode:[/red] {e}")
+
+
+@cli.command()
+@click.pass_context
+def activity(ctx):
+    """Open the activity dashboard to view history and audit trail."""
+    console.print("[blue]Opening Activity Dashboard...[/blue]")
+    try:
+        from ..gui import launch_activity_dashboard
+        launch_activity_dashboard()
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] GUI dependencies not installed. Install with: pip install sysagent-cli[gui]")
+        console.print(f"[dim]Details: {e}[/dim]")
+    except Exception as e:
+        console.print(f"[red]Error opening activity dashboard:[/red] {e}")
+
+
+@cli.group()
+@click.pass_context
+def sessions(ctx):
+    """Manage chat sessions."""
+    pass
+
+
+@sessions.command(name="list")
+@click.option('--limit', '-n', default=20, help='Number of sessions to show')
+@click.option('--search', '-s', help='Search sessions by title or content')
+@click.pass_context
+def list_sessions(ctx, limit, search):
+    """List saved chat sessions."""
+    from ..core.session_manager import SessionManager
+    
+    sm = SessionManager()
+    sessions_list = sm.list_sessions(limit=limit, search=search)
+    
+    if not sessions_list:
+        console.print("[dim]No sessions found[/dim]")
+        return
+    
+    console.print(f"[bold]Chat Sessions ({len(sessions_list)}):[/bold]\n")
+    
+    for session in sessions_list:
+        console.print(f"  [blue]{session['id']}[/blue] {session['title']}")
+        console.print(f"    [dim]{session['message_count']} messages | {session['updated_at'][:10]}[/dim]")
+        if session.get('preview'):
+            console.print(f"    [dim]Preview: {session['preview'][:50]}...[/dim]")
+        console.print()
+
+
+@sessions.command()
+@click.argument('session_id')
+@click.pass_context
+def show(ctx, session_id):
+    """Show a specific session."""
+    from ..core.session_manager import SessionManager
+    
+    sm = SessionManager()
+    session = sm.load_session(session_id)
+    
+    if not session:
+        console.print(f"[red]Session '{session_id}' not found[/red]")
+        return
+    
+    console.print(f"[bold]{session.title}[/bold]")
+    console.print(f"[dim]Created: {session.created_at} | Messages: {len(session.messages)}[/dim]\n")
+    
+    for msg in session.messages[-20:]:  # Show last 20 messages
+        role_color = "blue" if msg.role == "user" else "green"
+        console.print(f"[{role_color}]{msg.role.upper()}[/{role_color}]: {msg.content[:200]}")
+        console.print()
+
+
+@sessions.command()
+@click.argument('session_id')
+@click.option('--format', '-f', type=click.Choice(['json', 'markdown', 'text']), default='markdown', help='Export format')
+@click.option('--output', '-o', help='Output file path')
+@click.pass_context
+def export(ctx, session_id, format, output):
+    """Export a session to file."""
+    from ..core.session_manager import SessionManager
+    
+    sm = SessionManager()
+    content = sm.export_session(session_id, format=format)
+    
+    if not content:
+        console.print(f"[red]Session '{session_id}' not found[/red]")
+        return
+    
+    if output:
+        with open(output, 'w') as f:
+            f.write(content)
+        console.print(f"[green]✓[/green] Exported to {output}")
+    else:
+        console.print(content)
+
+
+@sessions.command()
+@click.argument('session_id')
+@click.option('--confirm', is_flag=True, help='Skip confirmation')
+@click.pass_context
+def delete(ctx, session_id, confirm):
+    """Delete a session."""
+    from ..core.session_manager import SessionManager
+    
+    if not confirm:
+        if not click.confirm(f"Delete session '{session_id}'?"):
+            console.print("[dim]Cancelled[/dim]")
+            return
+    
+    sm = SessionManager()
+    if sm.delete_session(session_id):
+        console.print(f"[green]✓[/green] Session '{session_id}' deleted")
+    else:
+        console.print(f"[red]Session '{session_id}' not found[/red]")
+
+
+@sessions.command()
+@click.pass_context
+def stats(ctx):
+    """Show session statistics."""
+    from ..core.session_manager import SessionManager
+    
+    sm = SessionManager()
+    stats = sm.get_statistics()
+    
+    console.print("[bold]Session Statistics:[/bold]\n")
+    console.print(f"  Total Sessions: {stats['total_sessions']}")
+    console.print(f"  Total Messages: {stats['total_messages']}")
+    console.print(f"  Storage Path: {stats['storage_path']}")
+    
+    if stats['current_session_id']:
+        console.print(f"  Current Session: {stats['current_session_id']}")
+    
+    if stats['recent_sessions']:
+        console.print("\n[bold]Recent Sessions:[/bold]")
+        for s in stats['recent_sessions'][:5]:
+            console.print(f"  • {s['id']}: {s['title'][:40]}")
+
+
+@cli.group()
+@click.pass_context
+def mode(ctx):
+    """Manage agent modes."""
+    pass
+
+
+@mode.command(name="list")
+@click.pass_context
+def list_modes(ctx):
+    """List available agent modes."""
+    from ..core.agent_modes import get_mode_manager
+    
+    mm = get_mode_manager()
+    modes = mm.list_modes()
+    
+    console.print("[bold]Available Agent Modes:[/bold]\n")
+    
+    for m in modes:
+        status = "[green](current)[/green]" if m['is_current'] else ""
+        console.print(f"  {m['icon']} [blue]{m['id']}[/blue] - {m['name']} {status}")
+        console.print(f"     {m['description']}")
+        console.print()
+
+
+@mode.command(name="set")
+@click.argument('mode_name')
+@click.pass_context
+def set_mode(ctx, mode_name):
+    """Set the agent mode."""
+    from ..core.agent_modes import get_mode_manager
+    
+    mm = get_mode_manager()
+    mode_enum = mm.get_mode_by_name(mode_name)
+    
+    if not mode_enum:
+        console.print(f"[red]Mode '{mode_name}' not found[/red]")
+        console.print("Available modes: general, developer, sysadmin, security, productivity, automation")
+        return
+    
+    config = mm.set_mode(mode_enum)
+    console.print(f"[green]✓[/green] Switched to {config.icon} {config.display_name}")
+    console.print(f"[dim]{config.description}[/dim]")
+
+
+@mode.command()
+@click.pass_context
+def current(ctx):
+    """Show current agent mode."""
+    from ..core.agent_modes import get_mode_manager
+    
+    mm = get_mode_manager()
+    config = mm.get_config()
+    
+    console.print(f"Current Mode: {config.icon} [bold]{config.display_name}[/bold]")
+    console.print(f"[dim]{config.description}[/dim]")
+    
+    if config.preferred_tools:
+        console.print(f"\nPreferred Tools: {', '.join(config.preferred_tools[:5])}")
+    
+    if config.quick_actions:
+        console.print("\nQuick Actions:")
+        for action in config.quick_actions[:3]:
+            console.print(f"  • {action['label']}")
+
+
 # Plugin management commands
 @cli.group()
 @click.pass_context
