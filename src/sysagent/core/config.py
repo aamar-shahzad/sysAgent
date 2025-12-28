@@ -73,12 +73,12 @@ class ConfigManager:
         except ValueError:
             provider = LLMProvider.OPENAI
         
-        # Create agent config
+        # Create agent config - use gpt-4o-mini by default for 128k context
         agent_config = AgentConfig(
             provider=provider,
             api_key=api_key,
             base_url=base_url if provider == LLMProvider.OLLAMA else None,
-            model="gpt-4" if provider == LLMProvider.OPENAI else "llama2",
+            model="gpt-4o-mini" if provider == LLMProvider.OPENAI else "llama2",
             config_dir=str(self.config_dir),
         )
         

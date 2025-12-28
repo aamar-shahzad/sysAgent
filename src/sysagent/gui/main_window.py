@@ -247,36 +247,95 @@ class MainWindow:
             self.chat_interface = ChatInterface(chat_container, on_send=self._on_chat_message)
 
     def _on_chat_message(self, message: str):
-        """Handle chat message from user."""
+        """Handle chat message from user with streaming support."""
         if self.agent:
-            try:
+            # Process in background thread to not block UI
+            import threading
+            thread = threading.Thread(target=self._process_chat_message, args=(message,))
+            thread.daemon = True
+            thread.start()
+        else:
+            self.chat_interface.add_message("Agent not initialized. Please configure your API key.", is_user=False)
+
+    def _process_chat_message(self, message: str):
+        """Process chat message in background thread."""
+        try:
+            # Try streaming first
+            use_streaming = hasattr(self.agent, 'process_command_streaming')
+            
+            if use_streaming:
+                # Create streaming message container
+                stream_data = None
+                try:
+                    self.root.after(0, lambda: setattr(self, '_stream_data', self.chat_interface.add_streaming_message()))
+                    import time
+                    time.sleep(0.05)  # Brief wait for UI update
+                    stream_data = getattr(self, '_stream_data', None)
+                except Exception:
+                    pass
+                
+                full_response = ""
+                for chunk in self.agent.process_command_streaming(message):
+                    chunk_type = chunk.get("type", "")
+                    content = chunk.get("content", "")
+                    
+                    if chunk_type == "content" and content:
+                        full_response = content  # Full content replacement
+                        if stream_data:
+                            stream_data["content"] = content
+                            self.root.after(0, lambda c=content: self._update_stream(stream_data, c))
+                    elif chunk_type == "token" and content:
+                        full_response += content
+                        if stream_data:
+                            self.root.after(0, lambda t=content: self.chat_interface.update_streaming_message(stream_data, t))
+                    elif chunk_type == "tool_call":
+                        name = chunk.get("name", "tool")
+                        self.root.after(0, lambda n=name: self._show_tool_status(n))
+                    elif chunk_type == "error":
+                        full_response = f"Error: {content}"
+                        break
+                    elif chunk_type == "done":
+                        break
+                
+                # Finalize streaming message
+                if stream_data:
+                    self.root.after(0, lambda: self.chat_interface.finish_streaming_message(stream_data))
+                elif full_response:
+                    self.root.after(0, lambda r=full_response: self.chat_interface.add_message(r, is_user=False))
+            else:
+                # Non-streaming fallback
                 result = self.agent.process_command(message)
                 
                 if result.get('success'):
                     response = result.get('message', 'Command executed successfully.')
-                    
-                    # Add tool info if available
-                    if result.get('data', {}).get('tools_used'):
-                        tools = result['data']['tools_used']
-                        response += f"\n\n[Tools used: {', '.join(tools)}]"
-                    
-                    # Add data summary if verbose
-                    data = result.get('data', {})
-                    if data and not data.get('tools_used'):
-                        # Format some data for display
-                        if isinstance(data, dict):
-                            data_str = self._format_data(data)
-                            if data_str:
-                                response += f"\n\n{data_str}"
                 else:
-                    response = f"Error: {result.get('message', 'Unknown error')}"
-                    if result.get('error'):
-                        response += f"\n{result['error']}"
+                    response = result.get('message', 'Unknown error')
                 
-                self.chat_interface.add_message(response, is_user=False)
+                self.root.after(0, lambda r=response: self.chat_interface.add_message(r, is_user=False))
                 
-            except Exception as e:
-                self.chat_interface.add_message(f"Error processing command: {str(e)}", is_user=False)
+        except Exception as e:
+            error_msg = str(e)
+            # Simplify context length error
+            if "context_length" in error_msg:
+                error_msg = "Conversation too long. Please start a new chat."
+            self.root.after(0, lambda m=error_msg: self.chat_interface.add_message(f"Error: {m}", is_user=False))
+
+    def _update_stream(self, stream_data: dict, content: str):
+        """Update stream content."""
+        if stream_data and "label" in stream_data:
+            try:
+                stream_data["label"].configure(text=content + "▌")
+                stream_data["content"] = content
+            except Exception:
+                pass
+
+    def _show_tool_status(self, tool_name: str):
+        """Show tool execution status."""
+        try:
+            if hasattr(self.chat_interface, 'status_label'):
+                self.chat_interface.status_label.configure(text=f"● Using {tool_name}...")
+        except Exception:
+            pass
         else:
             self.chat_interface.add_message(
                 "Agent not available. Please check your configuration and API keys in Settings.",
