@@ -1,194 +1,100 @@
 """
-Command Palette for SysAgent - Quick fuzzy search and execution of commands.
+Command Palette for SysAgent - Cursor AI-style quick command search.
+Press Ctrl+K / Cmd+K to open.
 """
 
 import tkinter as tk
-from typing import Optional, Callable, List, Dict, Any
+from typing import Optional, Callable, List, Dict
 from dataclasses import dataclass
 
 try:
     import customtkinter as ctk
+    CTK_AVAILABLE = True
 except ImportError:
-    ctk = None
+    CTK_AVAILABLE = False
 
 
 @dataclass
 class Command:
-    """Represents a command in the palette."""
-    name: str
+    """Represents a command."""
+    id: str
+    label: str
     description: str
-    action: str  # The actual command/query to execute
+    icon: str
     category: str
-    icon: str = "▶"
-    keywords: List[str] = None
+    action: str
+    shortcut: str = ""
+
+
+# Default commands organized by category
+DEFAULT_COMMANDS = [
+    # System
+    Command("sys_status", "System Status", "Show overall system status", "📊", "System", "Show system status"),
+    Command("sys_health", "Health Check", "Run full system health check", "🏥", "System", "Run system health check"),
+    Command("sys_cpu", "CPU Usage", "Show CPU usage details", "💻", "System", "Show CPU usage"),
+    Command("sys_memory", "Memory Usage", "Show memory usage", "🧠", "System", "Show memory usage"),
+    Command("sys_disk", "Disk Space", "Check disk space", "💾", "System", "Check disk space"),
+    Command("sys_processes", "List Processes", "Show running processes", "📋", "System", "List running processes"),
+    Command("sys_insights", "Quick Insights", "Get AI-powered insights", "⚡", "System", "Give me quick insights"),
     
-    def matches(self, query: str) -> bool:
-        """Check if command matches search query."""
-        query_lower = query.lower()
-        
-        # Check name
-        if query_lower in self.name.lower():
-            return True
-        
-        # Check description
-        if query_lower in self.description.lower():
-            return True
-        
-        # Check category
-        if query_lower in self.category.lower():
-            return True
-        
-        # Check keywords
-        if self.keywords:
-            for kw in self.keywords:
-                if query_lower in kw.lower():
-                    return True
-        
-        return False
+    # Files
+    Command("file_search", "Search Files", "Search for files by name", "🔍", "Files", "Search for files named "),
+    Command("file_large", "Find Large Files", "Find large files", "📦", "Files", "Find large files"),
+    Command("file_recent", "Recent Files", "Show recently modified files", "🕐", "Files", "Show recent files"),
+    Command("file_cleanup", "Clean Temp Files", "Clean temporary files", "🧹", "Files", "Clean temp files"),
+    Command("file_organize", "Organize Downloads", "Organize downloads folder", "📁", "Files", "Organize my downloads"),
     
-    def score(self, query: str) -> int:
-        """Score how well this matches (higher = better)."""
-        query_lower = query.lower()
-        score = 0
-        
-        # Exact name match = highest
-        if query_lower == self.name.lower():
-            score += 100
-        elif self.name.lower().startswith(query_lower):
-            score += 50
-        elif query_lower in self.name.lower():
-            score += 30
-        
-        # Description match
-        if query_lower in self.description.lower():
-            score += 10
-        
-        # Keyword match
-        if self.keywords:
-            for kw in self.keywords:
-                if query_lower in kw.lower():
-                    score += 20
-        
-        return score
+    # Network
+    Command("net_status", "Network Status", "Check network connections", "🌐", "Network", "Show network status"),
+    Command("net_ping", "Ping Test", "Test internet connectivity", "📡", "Network", "Ping google.com"),
+    Command("net_ports", "Open Ports", "Show open ports", "🚪", "Network", "Show open ports"),
+    
+    # Git
+    Command("git_status", "Git Status", "Show git repository status", "📂", "Git", "Git status"),
+    Command("git_log", "Git Log", "Show recent commits", "📜", "Git", "Show git log"),
+    Command("git_diff", "Git Diff", "Show uncommitted changes", "📝", "Git", "Git diff"),
+    
+    # Workflows
+    Command("wf_list", "List Workflows", "Show all workflows", "📋", "Workflows", "List all workflows"),
+    Command("wf_morning", "Morning Routine", "Run morning routine", "🌅", "Workflows", "Run morning routine workflow"),
+    Command("wf_dev", "Dev Setup", "Setup development environment", "💻", "Workflows", "Run dev setup workflow"),
+    Command("wf_maintenance", "System Maintenance", "Run maintenance tasks", "🔧", "Workflows", "Run system maintenance workflow"),
+    
+    # Tools
+    Command("tool_terminal", "Open Terminal", "Launch terminal view", "🖥️", "Tools", "open_terminal"),
+    Command("tool_browser", "Open Browser", "Open web browser", "🌍", "Tools", "Open browser"),
+    Command("tool_settings", "Settings", "Open settings", "⚙️", "Tools", "open_settings"),
+    
+    # Security
+    Command("sec_scan", "Security Scan", "Run security scan", "🔒", "Security", "Run security scan"),
+    Command("sec_ports", "Port Scan", "Scan for open ports", "🚪", "Security", "Scan for open ports"),
+]
 
 
 class CommandPalette:
     """
-    A quick command palette with fuzzy search.
-    Press Ctrl+K or Cmd+K to open.
+    Cursor AI-style command palette.
+    Fuzzy search across all commands with keyboard navigation.
     """
     
-    # Default commands
-    DEFAULT_COMMANDS = [
-        # System
-        Command("System Status", "Show overall system status", "Show my system status", "system", "💻", ["status", "overview"]),
-        Command("CPU Usage", "Show CPU usage details", "Show CPU usage", "system", "🔥", ["processor"]),
-        Command("Memory Usage", "Show RAM usage details", "Show memory usage", "system", "💾", ["ram"]),
-        Command("Disk Space", "Show disk space usage", "Show disk space", "system", "💿", ["storage"]),
-        Command("Battery Status", "Show battery information", "Show battery status", "system", "🔋", ["power"]),
-        Command("Health Check", "Run system health check", "Run a system health check", "system", "🏥", ["diagnose"]),
-        
-        # Processes
-        Command("List Processes", "Show running processes", "List all running processes", "process", "📋", ["ps"]),
-        Command("Kill Process", "Terminate a process", "Kill process named ", "process", "❌", ["terminate", "stop"]),
-        Command("Find Resource Hogs", "Find processes using most resources", "Find resource-heavy processes", "process", "🔍", ["heavy", "slow"]),
-        
-        # Browser
-        Command("Open Google", "Open Google in browser", "Open Google in browser", "browser", "🌐", ["search", "web"]),
-        Command("Open YouTube", "Open YouTube", "Open YouTube in browser", "browser", "▶️", ["video"]),
-        Command("Open GitHub", "Open GitHub", "Open GitHub in browser", "browser", "🐙", ["code", "repo"]),
-        Command("Search Web", "Search the web", "Search the web for ", "browser", "🔍", ["google"]),
-        
-        # Files
-        Command("Search Files", "Search for files", "Search for files named ", "files", "📁", ["find"]),
-        Command("Recent Files", "Show recently modified files", "Show my recent files", "files", "📄", ["latest"]),
-        Command("Open Downloads", "Open Downloads folder", "Open my Downloads folder", "files", "📥", ["download"]),
-        Command("Open Documents", "Open Documents folder", "Open my Documents folder", "files", "📂", []),
-        
-        # Git
-        Command("Git Status", "Show git status", "Show git status", "git", "📝", ["repo"]),
-        Command("Git Commit", "Commit changes", "Commit my changes with message: ", "git", "✅", ["save"]),
-        Command("Git Pull", "Pull latest changes", "Pull the latest changes", "git", "⬇️", ["fetch"]),
-        Command("Git Push", "Push changes", "Push my changes", "git", "⬆️", ["upload"]),
-        
-        # Media
-        Command("Volume Up", "Increase volume", "Increase the volume", "media", "🔊", ["louder"]),
-        Command("Volume Down", "Decrease volume", "Decrease the volume", "media", "🔉", ["quieter"]),
-        Command("Mute", "Mute audio", "Mute the audio", "media", "🔇", ["silence"]),
-        Command("Play/Pause", "Toggle media playback", "Play or pause the media", "media", "⏯️", ["music"]),
-        
-        # Notifications
-        Command("Send Notification", "Send a notification", "Send a notification saying: ", "notify", "🔔", ["alert"]),
-        Command("Set Reminder", "Create a reminder", "Remind me to ", "notify", "⏰", ["timer"]),
-        
-        # Workflows
-        Command("Run Workflow", "Run a saved workflow", "Run the workflow named ", "workflow", "▶️", ["automation"]),
-        Command("List Workflows", "Show all workflows", "List all my workflows", "workflow", "📋", []),
-        Command("Morning Routine", "Run morning routine", "Run my morning routine", "workflow", "☀️", ["start day"]),
-        
-        # Packages
-        Command("Install Package", "Install a package", "Install the package ", "packages", "📦", ["add"]),
-        Command("Update Packages", "Update all packages", "Update all my packages", "packages", "⬆️", ["upgrade"]),
-        Command("Search Packages", "Search for a package", "Search for a package named ", "packages", "🔍", []),
-        
-        # Windows
-        Command("List Windows", "Show open windows", "List all open windows", "windows", "🪟", []),
-        Command("Tile Windows", "Tile windows left/right", "Tile my windows", "windows", "⬜", ["arrange"]),
-        Command("Minimize All", "Minimize all windows", "Minimize all windows", "windows", "⬇️", ["hide"]),
-        
-        # Quick Actions
-        Command("Lock Screen", "Lock the computer", "Lock my screen", "quick", "🔒", ["security"]),
-        Command("Take Screenshot", "Take a screenshot", "Take a screenshot", "quick", "📸", ["capture"]),
-        Command("Empty Trash", "Empty the trash", "Empty my trash", "quick", "🗑️", ["delete"]),
-        
-        # Notes & Docs
-        Command("Create Note", "Create a new note", "Create a note about ", "docs", "📝", ["write"]),
-        Command("Create Spreadsheet", "Create new spreadsheet", "Create a new spreadsheet", "docs", "📊", ["excel"]),
-        Command("Search Notes", "Search my notes", "Search my notes for ", "docs", "🔍", []),
-        
-        # Email
-        Command("Compose Email", "Write a new email", "Compose an email to ", "email", "✉️", ["mail"]),
-        
-        # Settings
-        Command("Preferences", "Open preferences", "Show my preferences", "settings", "⚙️", ["config"]),
-        Command("Show History", "Show command history", "Show my command history", "settings", "📜", []),
-    ]
+    THEME = {
+        "bg": "#0d1117",
+        "bg_hover": "#161b22",
+        "bg_selected": "#21262d",
+        "border": "#30363d",
+        "text": "#e6edf3",
+        "text_muted": "#8b949e",
+        "accent": "#58a6ff",
+    }
     
-    def __init__(self, parent, on_command: Callable[[str], None]):
-        """
-        Initialize command palette.
-        
-        Args:
-            parent: Parent window
-            on_command: Callback when command is selected (receives action string)
-        """
+    def __init__(self, parent, on_command: Optional[Callable[[str], None]] = None):
         self.parent = parent
         self.on_command = on_command
-        self.commands = self.DEFAULT_COMMANDS.copy()
+        self.commands = DEFAULT_COMMANDS.copy()
         self.filtered_commands: List[Command] = []
         self.selected_index = 0
-        self.window: Optional[tk.Toplevel] = None
         self.is_open = False
-        
-    def add_command(self, command: Command):
-        """Add a custom command."""
-        self.commands.append(command)
-        
-    def add_recent_command(self, name: str, action: str):
-        """Add a recent/frequent command to the top."""
-        cmd = Command(
-            name=name,
-            description="Recent command",
-            action=action,
-            category="recent",
-            icon="🕐"
-        )
-        # Add to front, remove duplicates
-        self.commands = [c for c in self.commands if c.action != action]
-        self.commands.insert(0, cmd)
-        # Keep max 50 recent
-        if len([c for c in self.commands if c.category == "recent"]) > 10:
-            self.commands = [c for c in self.commands if c.category != "recent" or self.commands.index(c) < 10]
+        self.window = None
     
     def open(self):
         """Open the command palette."""
@@ -196,310 +102,325 @@ class CommandPalette:
             self.close()
             return
         
+        if not CTK_AVAILABLE:
+            return
+        
         self.is_open = True
-        self.selected_index = 0
         
-        # Create popup window
-        if ctk:
-            self.window = ctk.CTkToplevel(self.parent)
-        else:
-            self.window = tk.Toplevel(self.parent)
-        
+        # Create overlay window
+        self.window = ctk.CTkToplevel(self.parent)
         self.window.title("")
-        self.window.overrideredirect(True)  # No title bar
+        self.window.overrideredirect(True)
         
         # Position in center of parent
-        parent_x = self.parent.winfo_rootx()
-        parent_y = self.parent.winfo_rooty()
-        parent_w = self.parent.winfo_width()
-        parent_h = self.parent.winfo_height()
-        
-        width = 600
-        height = 400
-        x = parent_x + (parent_w - width) // 2
-        y = parent_y + (parent_h - height) // 3
-        
+        width, height = 600, 450
+        x = self.parent.winfo_rootx() + (self.parent.winfo_width() - width) // 2
+        y = self.parent.winfo_rooty() + 80
         self.window.geometry(f"{width}x{height}+{x}+{y}")
-        self.window.configure(bg="#1e1e1e")
         
-        # Make it stay on top
-        self.window.attributes("-topmost", True)
+        # Main frame with shadow effect
+        self.main_frame = ctk.CTkFrame(
+            self.window,
+            fg_color=self.THEME["bg"],
+            corner_radius=12,
+            border_width=1,
+            border_color=self.THEME["border"]
+        )
+        self.main_frame.pack(fill="both", expand=True, padx=2, pady=2)
         
-        # Focus handling
-        self.window.bind("<FocusOut>", lambda e: self._on_focus_out(e))
-        self.window.bind("<Escape>", lambda e: self.close())
+        # Search input
+        self.search_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.search_frame.pack(fill="x", padx=16, pady=(16, 8))
         
-        # Main frame
-        if ctk:
-            main_frame = ctk.CTkFrame(self.window, fg_color="#1e1e1e", corner_radius=10)
-        else:
-            main_frame = tk.Frame(self.window, bg="#1e1e1e")
-        main_frame.pack(fill="both", expand=True, padx=2, pady=2)
+        ctk.CTkLabel(
+            self.search_frame,
+            text="🔍",
+            font=ctk.CTkFont(size=16),
+            text_color=self.THEME["text_muted"]
+        ).pack(side="left", padx=(0, 8))
         
-        # Search entry
-        if ctk:
-            self.search_var = ctk.StringVar()
-            self.search_entry = ctk.CTkEntry(
-                main_frame,
-                placeholder_text="Type a command...",
-                textvariable=self.search_var,
-                height=50,
-                font=("SF Pro Display", 18),
-                fg_color="#2d2d2d",
-                border_color="#444",
-                text_color="white"
-            )
-        else:
-            self.search_var = tk.StringVar()
-            self.search_entry = tk.Entry(
-                main_frame,
-                textvariable=self.search_var,
-                font=("Helvetica", 18),
-                bg="#2d2d2d",
-                fg="white",
-                insertbackground="white"
-            )
+        self.search_entry = ctk.CTkEntry(
+            self.search_frame,
+            placeholder_text="Search commands...",
+            font=ctk.CTkFont(size=14),
+            fg_color="transparent",
+            border_width=0,
+            text_color=self.THEME["text"],
+            height=36
+        )
+        self.search_entry.pack(side="left", fill="x", expand=True)
+        self.search_entry.focus_set()
         
-        self.search_entry.pack(fill="x", padx=10, pady=10)
+        # Separator
+        ctk.CTkFrame(
+            self.main_frame,
+            fg_color=self.THEME["border"],
+            height=1
+        ).pack(fill="x", padx=16, pady=8)
+        
+        # Results area
+        self.results_frame = ctk.CTkScrollableFrame(
+            self.main_frame,
+            fg_color="transparent"
+        )
+        self.results_frame.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        
+        # Bindings
         self.search_entry.bind("<KeyRelease>", self._on_search)
         self.search_entry.bind("<Return>", self._on_select)
         self.search_entry.bind("<Up>", self._on_up)
         self.search_entry.bind("<Down>", self._on_down)
+        self.search_entry.bind("<Escape>", self._on_escape)
+        self.window.bind("<FocusOut>", self._on_focus_out)
         
-        # Results frame with scrollable
-        if ctk:
-            self.results_frame = ctk.CTkScrollableFrame(
-                main_frame,
-                fg_color="#1e1e1e"
-            )
-        else:
-            self.results_frame = tk.Frame(main_frame, bg="#1e1e1e")
-        self.results_frame.pack(fill="both", expand=True, padx=10, pady=5)
-        
-        # Initial display
+        # Show all commands initially
         self._filter_commands("")
-        self._display_results()
         
-        # Focus search
-        self.search_entry.focus_set()
+        # Keep focus
+        self.window.after(100, lambda: self.search_entry.focus_set())
     
     def close(self):
         """Close the command palette."""
         if self.window:
-            self.window.destroy()
+            try:
+                self.window.destroy()
+            except Exception:
+                pass
             self.window = None
         self.is_open = False
     
-    def _on_focus_out(self, event):
-        """Handle focus out."""
-        # Small delay to check if focus moved to child
-        if self.window:
-            self.window.after(100, self._check_focus)
-    
-    def _check_focus(self):
-        """Check if palette should close."""
-        if self.window:
-            try:
-                focused = self.window.focus_get()
-                if focused is None:
-                    self.close()
-            except:
-                self.close()
-    
     def _on_search(self, event):
         """Handle search input."""
-        query = self.search_var.get()
+        if event.keysym in ("Up", "Down", "Return", "Escape"):
+            return
+        
+        query = self.search_entry.get()
         self._filter_commands(query)
-        self.selected_index = 0
-        self._display_results()
     
     def _filter_commands(self, query: str):
-        """Filter commands by query."""
-        if not query:
-            self.filtered_commands = self.commands[:15]  # Show first 15
+        """Filter commands by query using fuzzy matching."""
+        query_lower = query.lower().strip()
+        
+        if not query_lower:
+            self.filtered_commands = self.commands.copy()
         else:
-            # Score and sort
-            matches = [(cmd, cmd.score(query)) for cmd in self.commands if cmd.matches(query)]
-            matches.sort(key=lambda x: x[1], reverse=True)
-            self.filtered_commands = [cmd for cmd, score in matches[:15]]
+            # Score commands
+            scored = []
+            for cmd in self.commands:
+                score = self._fuzzy_score(query_lower, cmd)
+                if score > 0:
+                    scored.append((cmd, score))
+            
+            # Sort by score descending
+            scored.sort(key=lambda x: x[1], reverse=True)
+            self.filtered_commands = [cmd for cmd, _ in scored[:15]]
+        
+        self.selected_index = 0
+        self._render_results()
     
-    def _display_results(self):
-        """Display filtered results."""
+    def _fuzzy_score(self, query: str, cmd: Command) -> int:
+        """Calculate fuzzy match score."""
+        score = 0
+        
+        # Exact match in label
+        label_lower = cmd.label.lower()
+        if query == label_lower:
+            score += 100
+        elif query in label_lower:
+            score += 50
+        elif self._subsequence_match(query, label_lower):
+            score += 30
+        
+        # Match in description
+        desc_lower = cmd.description.lower()
+        if query in desc_lower:
+            score += 20
+        
+        # Match in category
+        cat_lower = cmd.category.lower()
+        if query in cat_lower:
+            score += 10
+        
+        # Match in action
+        action_lower = cmd.action.lower()
+        if query in action_lower:
+            score += 15
+        
+        return score
+    
+    def _subsequence_match(self, query: str, text: str) -> bool:
+        """Check if query is a subsequence of text."""
+        query_idx = 0
+        for char in text:
+            if query_idx < len(query) and char == query[query_idx]:
+                query_idx += 1
+        return query_idx == len(query)
+    
+    def _render_results(self):
+        """Render filtered results."""
         # Clear existing
         for widget in self.results_frame.winfo_children():
             widget.destroy()
         
         if not self.filtered_commands:
-            if ctk:
-                label = ctk.CTkLabel(
-                    self.results_frame,
-                    text="No commands found",
-                    text_color="#888",
-                    font=("SF Pro Display", 14)
-                )
-            else:
-                label = tk.Label(
-                    self.results_frame,
-                    text="No commands found",
-                    fg="#888",
-                    bg="#1e1e1e",
-                    font=("Helvetica", 14)
-                )
-            label.pack(pady=20)
+            ctk.CTkLabel(
+                self.results_frame,
+                text="No commands found",
+                font=ctk.CTkFont(size=13),
+                text_color=self.THEME["text_muted"]
+            ).pack(pady=20)
             return
         
-        for i, cmd in enumerate(self.filtered_commands):
-            is_selected = i == self.selected_index
-            self._create_command_row(cmd, i, is_selected)
-    
-    def _create_command_row(self, cmd: Command, index: int, selected: bool):
-        """Create a command row."""
-        bg_color = "#3d3d3d" if selected else "#1e1e1e"
+        current_category = None
         
-        if ctk:
+        for i, cmd in enumerate(self.filtered_commands):
+            # Category header
+            if cmd.category != current_category:
+                current_category = cmd.category
+                ctk.CTkLabel(
+                    self.results_frame,
+                    text=current_category.upper(),
+                    font=ctk.CTkFont(size=10, weight="bold"),
+                    text_color=self.THEME["text_muted"]
+                ).pack(anchor="w", padx=12, pady=(12 if i > 0 else 4, 4))
+            
+            # Command row
+            is_selected = i == self.selected_index
+            bg = self.THEME["bg_selected"] if is_selected else "transparent"
+            
             row = ctk.CTkFrame(
                 self.results_frame,
-                fg_color=bg_color,
-                corner_radius=5,
-                height=50
+                fg_color=bg,
+                corner_radius=6,
+                height=44
             )
-        else:
-            row = tk.Frame(self.results_frame, bg=bg_color, height=50)
-        
-        row.pack(fill="x", pady=2)
-        row.pack_propagate(False)
-        
-        # Bind click
-        row.bind("<Button-1>", lambda e, i=index: self._select_index(i))
-        
-        # Icon and name
-        if ctk:
+            row.pack(fill="x", padx=4, pady=1)
+            row.pack_propagate(False)
+            
+            # Make clickable
+            row.bind("<Button-1>", lambda e, idx=i: self._select_index(idx))
+            row.bind("<Enter>", lambda e, idx=i, r=row: self._on_hover(idx, r))
+            row.bind("<Leave>", lambda e, r=row: self._on_leave(r))
+            
+            inner = ctk.CTkFrame(row, fg_color="transparent")
+            inner.pack(fill="both", expand=True, padx=12)
+            inner.bind("<Button-1>", lambda e, idx=i: self._select_index(idx))
+            
+            # Icon
             icon_label = ctk.CTkLabel(
-                row,
+                inner,
                 text=cmd.icon,
-                font=("SF Pro Display", 18),
-                width=40,
-                fg_color="transparent",
-                text_color="white"
+                font=ctk.CTkFont(size=16),
+                width=28
             )
-        else:
-            icon_label = tk.Label(
-                row,
-                text=cmd.icon,
-                font=("Helvetica", 18),
-                width=3,
-                bg=bg_color,
-                fg="white"
-            )
-        icon_label.pack(side="left", padx=(10, 5))
-        icon_label.bind("<Button-1>", lambda e, i=index: self._select_index(i))
-        
-        # Text frame
-        if ctk:
-            text_frame = ctk.CTkFrame(row, fg_color="transparent")
-        else:
-            text_frame = tk.Frame(row, bg=bg_color)
-        text_frame.pack(side="left", fill="both", expand=True, padx=5)
-        text_frame.bind("<Button-1>", lambda e, i=index: self._select_index(i))
-        
-        # Name
-        if ctk:
+            icon_label.pack(side="left", pady=10)
+            icon_label.bind("<Button-1>", lambda e, idx=i: self._select_index(idx))
+            
+            # Label and description
+            text_frame = ctk.CTkFrame(inner, fg_color="transparent")
+            text_frame.pack(side="left", fill="x", expand=True, padx=8)
+            text_frame.bind("<Button-1>", lambda e, idx=i: self._select_index(idx))
+            
             name_label = ctk.CTkLabel(
                 text_frame,
-                text=cmd.name,
-                font=("SF Pro Display", 14, "bold"),
-                text_color="white",
+                text=cmd.label,
+                font=ctk.CTkFont(size=13),
+                text_color=self.THEME["text"],
                 anchor="w"
             )
-        else:
-            name_label = tk.Label(
-                text_frame,
-                text=cmd.name,
-                font=("Helvetica", 14, "bold"),
-                fg="white",
-                bg=bg_color,
-                anchor="w"
-            )
-        name_label.pack(side="top", fill="x")
-        name_label.bind("<Button-1>", lambda e, i=index: self._select_index(i))
-        
-        # Description
-        if ctk:
+            name_label.pack(anchor="w")
+            name_label.bind("<Button-1>", lambda e, idx=i: self._select_index(idx))
+            
             desc_label = ctk.CTkLabel(
                 text_frame,
                 text=cmd.description,
-                font=("SF Pro Display", 11),
-                text_color="#888",
+                font=ctk.CTkFont(size=11),
+                text_color=self.THEME["text_muted"],
                 anchor="w"
             )
-        else:
-            desc_label = tk.Label(
-                text_frame,
-                text=cmd.description,
-                font=("Helvetica", 11),
-                fg="#888",
-                bg=bg_color,
-                anchor="w"
-            )
-        desc_label.pack(side="top", fill="x")
-        desc_label.bind("<Button-1>", lambda e, i=index: self._select_index(i))
-        
-        # Category badge
-        if ctk:
-            cat_label = ctk.CTkLabel(
-                row,
-                text=cmd.category,
-                font=("SF Pro Display", 10),
-                text_color="#666",
-                fg_color="#2d2d2d",
-                corner_radius=5,
-                width=60
-            )
-        else:
-            cat_label = tk.Label(
-                row,
-                text=cmd.category,
-                font=("Helvetica", 10),
-                fg="#666",
-                bg="#2d2d2d"
-            )
-        cat_label.pack(side="right", padx=10)
-        cat_label.bind("<Button-1>", lambda e, i=index: self._select_index(i))
+            desc_label.pack(anchor="w")
+            desc_label.bind("<Button-1>", lambda e, idx=i: self._select_index(idx))
+            
+            # Shortcut if any
+            if cmd.shortcut:
+                ctk.CTkLabel(
+                    inner,
+                    text=cmd.shortcut,
+                    font=ctk.CTkFont(size=10),
+                    text_color=self.THEME["text_muted"]
+                ).pack(side="right")
+    
+    def _on_hover(self, index: int, row):
+        """Handle mouse hover."""
+        self.selected_index = index
+        row.configure(fg_color=self.THEME["bg_hover"])
+    
+    def _on_leave(self, row):
+        """Handle mouse leave."""
+        row.configure(fg_color="transparent")
     
     def _on_up(self, event):
-        """Handle up arrow."""
-        if self.selected_index > 0:
-            self.selected_index -= 1
-            self._display_results()
+        """Navigate up."""
+        if self.filtered_commands:
+            self.selected_index = max(0, self.selected_index - 1)
+            self._render_results()
         return "break"
     
     def _on_down(self, event):
-        """Handle down arrow."""
-        if self.selected_index < len(self.filtered_commands) - 1:
-            self.selected_index += 1
-            self._display_results()
+        """Navigate down."""
+        if self.filtered_commands:
+            self.selected_index = min(len(self.filtered_commands) - 1, self.selected_index + 1)
+            self._render_results()
+        return "break"
+    
+    def _on_select(self, event):
+        """Select current command."""
+        self._select_index(self.selected_index)
         return "break"
     
     def _select_index(self, index: int):
         """Select command at index."""
-        self.selected_index = index
-        self._on_select(None)
-    
-    def _on_select(self, event):
-        """Handle command selection."""
-        if self.filtered_commands and 0 <= self.selected_index < len(self.filtered_commands):
-            cmd = self.filtered_commands[self.selected_index]
-            action = cmd.action
-            
-            # If action ends with space or colon, append search query
-            if action.endswith(": ") or action.endswith(" "):
-                query = self.search_var.get()
-                # Remove matched command name from query to get extra input
-                words = query.split()
-                if len(words) > 1:
-                    action += " ".join(words[1:])
-            
+        if 0 <= index < len(self.filtered_commands):
+            cmd = self.filtered_commands[index]
             self.close()
             
-            if self.on_command:
-                self.on_command(action)
+            # Handle special actions
+            if cmd.action.startswith("open_"):
+                # Internal action
+                pass
+            elif self.on_command:
+                self.on_command(cmd.action)
+    
+    def _on_escape(self, event):
+        """Close on escape."""
+        self.close()
+        return "break"
+    
+    def _on_focus_out(self, event):
+        """Close on focus out."""
+        # Small delay to allow clicking on results
+        if self.window:
+            self.window.after(200, self._check_focus)
+    
+    def _check_focus(self):
+        """Check if focus is still in palette."""
+        try:
+            focused = self.parent.focus_get()
+            if focused and self.window:
+                # Check if focused widget is a child of our window
+                parent = focused
+                while parent:
+                    if parent == self.window:
+                        return
+                    parent = parent.master if hasattr(parent, 'master') else None
+            self.close()
+        except Exception:
+            pass
+    
+    def add_command(self, command: Command):
+        """Add a custom command."""
+        self.commands.append(command)
+    
+    def remove_command(self, command_id: str):
+        """Remove a command by ID."""
+        self.commands = [c for c in self.commands if c.id != command_id]

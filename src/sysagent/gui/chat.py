@@ -1,6 +1,6 @@
 """
-Commercial-Grade Chat Interface for SysAgent GUI.
-Professional UI with streaming, loading states, and smart features.
+Cursor AI-Style Chat Interface for SysAgent.
+Clean, minimal, smart UI with streaming and inline suggestions.
 """
 
 import tkinter as tk
@@ -27,9 +27,7 @@ class MessageType(Enum):
     ASSISTANT = "assistant"
     SYSTEM = "system"
     ERROR = "error"
-    SUCCESS = "success"
     TOOL = "tool"
-    LOADING = "loading"
 
 
 @dataclass
@@ -46,158 +44,436 @@ class ChatMessage:
             self.timestamp = datetime.now()
 
 
-class ThinkingAnimation:
-    """Animated thinking/loading indicator."""
+# Modern color scheme inspired by Cursor AI
+THEME = {
+    "bg_primary": "#0d1117",
+    "bg_secondary": "#161b22",
+    "bg_tertiary": "#21262d",
+    "bg_input": "#0d1117",
+    "border": "#30363d",
+    "border_focus": "#58a6ff",
+    "text_primary": "#e6edf3",
+    "text_secondary": "#8b949e",
+    "text_muted": "#6e7681",
+    "accent": "#58a6ff",
+    "accent_hover": "#79c0ff",
+    "user_bubble": "#238636",
+    "assistant_bg": "transparent",
+    "error": "#f85149",
+    "warning": "#d29922",
+    "success": "#3fb950",
+    "tool_bg": "#1f2428",
+    "code_bg": "#161b22",
+}
+
+
+class SmartInput:
+    """Smart input field with autocomplete suggestions."""
     
-    def __init__(self, parent, label_widget):
+    SUGGESTIONS = [
+        "Show system status",
+        "Check CPU usage",
+        "Show memory usage",
+        "List running processes",
+        "Check disk space",
+        "Run system health check",
+        "Search for files",
+        "Clean temp files",
+        "Show network connections",
+        "Git status",
+        "Open browser",
+        "List workflows",
+        "Quick insights",
+    ]
+    
+    def __init__(self, parent, on_send: Callable, theme: dict):
         self.parent = parent
-        self.label = label_widget
-        self.running = False
-        self.dots = 0
-        self.frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-        self.frame_idx = 0
-    
-    def start(self, text: str = "Thinking"):
-        """Start the animation."""
-        self.running = True
-        self.base_text = text
-        self._animate()
-    
-    def stop(self):
-        """Stop the animation."""
-        self.running = False
-    
-    def _animate(self):
-        """Animate the indicator."""
-        if not self.running:
-            return
+        self.on_send = on_send
+        self.theme = theme
+        self.suggestion_visible = False
+        self.selected_suggestion = 0
+        self.filtered_suggestions = []
+        self.command_history: List[str] = []
+        self.history_index = -1
         
-        try:
-            spinner = self.frames[self.frame_idx % len(self.frames)]
-            self.label.configure(text=f"{spinner} {self.base_text}...")
-            self.frame_idx += 1
-            self.parent.after(80, self._animate)
-        except Exception:
-            pass
-
-
-class ToolExecutionCard:
-    """Visual card for tool execution status."""
-    
-    STATUS_COLORS = {
-        "pending": ("#64748b", "#94a3b8"),
-        "running": ("#f59e0b", "#fbbf24"),
-        "success": ("#10b981", "#34d399"),
-        "error": ("#ef4444", "#f87171"),
-    }
-    
-    STATUS_ICONS = {
-        "pending": "○",
-        "running": "◐",
-        "success": "●",
-        "error": "✕",
-    }
-    
-    def __init__(self, parent, tool_name: str, action: str = ""):
-        self.parent = parent
-        self.tool_name = tool_name
-        self.action = action
-        self.status = "pending"
-        self.start_time = time.time()
-        self.frame = None
-        self.status_label = None
-        self.duration_label = None
         self._create_widget()
     
     def _create_widget(self):
-        """Create the tool execution card."""
+        """Create the smart input widget."""
         if not CTK_AVAILABLE:
             return
         
-        self.frame = ctk.CTkFrame(
-            self.parent,
-            fg_color=("#f1f5f9", "#1e293b"),
-            corner_radius=8,
-            height=44
+        self.frame = ctk.CTkFrame(self.parent, fg_color="transparent")
+        
+        # Input wrapper with border
+        self.input_wrapper = ctk.CTkFrame(
+            self.frame,
+            fg_color=self.theme["bg_input"],
+            corner_radius=12,
+            border_width=1,
+            border_color=self.theme["border"]
         )
-        self.frame.pack(fill="x", padx=60, pady=3)
-        self.frame.pack_propagate(False)
+        self.input_wrapper.pack(fill="x", padx=16, pady=12)
         
         # Inner container
-        inner = ctk.CTkFrame(self.frame, fg_color="transparent")
-        inner.pack(fill="both", expand=True, padx=12, pady=8)
+        inner = ctk.CTkFrame(self.input_wrapper, fg_color="transparent")
+        inner.pack(fill="both", expand=True, padx=4, pady=4)
         
-        # Status indicator
+        # Text input
+        self.input_field = ctk.CTkTextbox(
+            inner,
+            height=50,
+            fg_color="transparent",
+            font=ctk.CTkFont(size=14),
+            text_color=self.theme["text_primary"],
+            wrap="word",
+            border_width=0
+        )
+        self.input_field.pack(side="left", fill="both", expand=True, padx=8, pady=4)
+        
+        # Send button
+        self.send_btn = ctk.CTkButton(
+            inner,
+            text="↑",
+            width=36,
+            height=36,
+            corner_radius=18,
+            font=ctk.CTkFont(size=18, weight="bold"),
+            fg_color=self.theme["accent"],
+            hover_color=self.theme["accent_hover"],
+            command=self._send
+        )
+        self.send_btn.pack(side="right", padx=4)
+        
+        # Placeholder
+        self._placeholder = "Message SysAgent..."
+        self._placeholder_active = True
+        self._show_placeholder()
+        
+        # Bindings
+        self.input_field.bind("<FocusIn>", self._on_focus_in)
+        self.input_field.bind("<FocusOut>", self._on_focus_out)
+        self.input_field.bind("<Return>", self._on_return)
+        self.input_field.bind("<Shift-Return>", lambda e: None)
+        self.input_field.bind("<KeyRelease>", self._on_key_release)
+        self.input_field.bind("<Up>", self._on_up)
+        self.input_field.bind("<Down>", self._on_down)
+        self.input_field.bind("<Tab>", self._on_tab)
+        self.input_field.bind("<Escape>", self._hide_suggestions)
+        
+        # Suggestion popup
+        self.suggestion_frame = None
+    
+    def _show_placeholder(self):
+        """Show placeholder text."""
+        self._placeholder_active = True
+        self.input_field.delete("1.0", "end")
+        self.input_field.insert("1.0", self._placeholder)
+        self.input_field.configure(text_color=self.theme["text_muted"])
+    
+    def _on_focus_in(self, event):
+        """Handle focus in."""
+        self.input_wrapper.configure(border_color=self.theme["border_focus"])
+        if self._placeholder_active:
+            self.input_field.delete("1.0", "end")
+            self.input_field.configure(text_color=self.theme["text_primary"])
+            self._placeholder_active = False
+    
+    def _on_focus_out(self, event):
+        """Handle focus out."""
+        self.input_wrapper.configure(border_color=self.theme["border"])
+        content = self.input_field.get("1.0", "end").strip()
+        if not content:
+            self._show_placeholder()
+        self._hide_suggestions(None)
+    
+    def _on_return(self, event):
+        """Handle Enter key."""
+        if event.state & 0x1:  # Shift pressed
+            return None
+        self._send()
+        return "break"
+    
+    def _on_key_release(self, event):
+        """Handle key release for autocomplete."""
+        if event.keysym in ("Up", "Down", "Return", "Tab", "Escape", "Shift_L", "Shift_R"):
+            return
+        
+        content = self.input_field.get("1.0", "end").strip()
+        if content and not self._placeholder_active:
+            self._show_suggestions(content)
+        else:
+            self._hide_suggestions(None)
+    
+    def _show_suggestions(self, query: str):
+        """Show autocomplete suggestions."""
+        query_lower = query.lower()
+        self.filtered_suggestions = [
+            s for s in self.SUGGESTIONS
+            if query_lower in s.lower() and s.lower() != query_lower
+        ][:5]
+        
+        if not self.filtered_suggestions:
+            self._hide_suggestions(None)
+            return
+        
+        if not self.suggestion_frame:
+            self.suggestion_frame = ctk.CTkFrame(
+                self.frame,
+                fg_color=self.theme["bg_secondary"],
+                corner_radius=8,
+                border_width=1,
+                border_color=self.theme["border"]
+            )
+        
+        # Clear existing
+        for widget in self.suggestion_frame.winfo_children():
+            widget.destroy()
+        
+        self.selected_suggestion = 0
+        
+        for i, suggestion in enumerate(self.filtered_suggestions):
+            bg = self.theme["bg_tertiary"] if i == self.selected_suggestion else "transparent"
+            btn = ctk.CTkButton(
+                self.suggestion_frame,
+                text=suggestion,
+                font=ctk.CTkFont(size=13),
+                height=32,
+                anchor="w",
+                fg_color=bg,
+                hover_color=self.theme["bg_tertiary"],
+                text_color=self.theme["text_primary"],
+                command=lambda s=suggestion: self._select_suggestion(s)
+            )
+            btn.pack(fill="x", padx=4, pady=2)
+        
+        self.suggestion_frame.place(
+            in_=self.input_wrapper,
+            relx=0,
+            rely=0,
+            y=-len(self.filtered_suggestions) * 36 - 10,
+            relwidth=1
+        )
+        self.suggestion_visible = True
+    
+    def _hide_suggestions(self, event):
+        """Hide suggestions."""
+        if self.suggestion_frame:
+            self.suggestion_frame.place_forget()
+        self.suggestion_visible = False
+    
+    def _select_suggestion(self, suggestion: str):
+        """Select a suggestion."""
+        self.input_field.delete("1.0", "end")
+        self.input_field.insert("1.0", suggestion)
+        self._placeholder_active = False
+        self._hide_suggestions(None)
+        self.input_field.focus_set()
+    
+    def _on_up(self, event):
+        """Navigate suggestions up or history."""
+        if self.suggestion_visible and self.filtered_suggestions:
+            self.selected_suggestion = max(0, self.selected_suggestion - 1)
+            self._update_suggestion_highlight()
+            return "break"
+        elif self.command_history:
+            if self.history_index < len(self.command_history) - 1:
+                self.history_index += 1
+                self.set_text(self.command_history[-(self.history_index + 1)])
+            return "break"
+    
+    def _on_down(self, event):
+        """Navigate suggestions down or history."""
+        if self.suggestion_visible and self.filtered_suggestions:
+            self.selected_suggestion = min(len(self.filtered_suggestions) - 1, self.selected_suggestion + 1)
+            self._update_suggestion_highlight()
+            return "break"
+        elif self.history_index > 0:
+            self.history_index -= 1
+            self.set_text(self.command_history[-(self.history_index + 1)])
+            return "break"
+        elif self.history_index == 0:
+            self.history_index = -1
+            self.set_text("")
+            return "break"
+    
+    def _on_tab(self, event):
+        """Accept suggestion on tab."""
+        if self.suggestion_visible and self.filtered_suggestions:
+            self._select_suggestion(self.filtered_suggestions[self.selected_suggestion])
+            return "break"
+    
+    def _update_suggestion_highlight(self):
+        """Update suggestion highlight."""
+        if not self.suggestion_frame:
+            return
+        
+        for i, widget in enumerate(self.suggestion_frame.winfo_children()):
+            bg = self.theme["bg_tertiary"] if i == self.selected_suggestion else "transparent"
+            widget.configure(fg_color=bg)
+    
+    def _send(self):
+        """Send the message."""
+        content = self.input_field.get("1.0", "end").strip()
+        
+        if self._placeholder_active or not content:
+            return
+        
+        # Add to history
+        if content and (not self.command_history or self.command_history[-1] != content):
+            self.command_history.append(content)
+        self.history_index = -1
+        
+        # Clear and show placeholder
+        self.input_field.delete("1.0", "end")
+        self._show_placeholder()
+        self._hide_suggestions(None)
+        
+        # Send
+        if self.on_send:
+            self.on_send(content)
+    
+    def set_text(self, text: str):
+        """Set input text."""
+        self.input_field.delete("1.0", "end")
+        if text:
+            self.input_field.insert("1.0", text)
+            self._placeholder_active = False
+            self.input_field.configure(text_color=self.theme["text_primary"])
+        else:
+            self._show_placeholder()
+    
+    def get_frame(self):
+        return self.frame
+    
+    def set_enabled(self, enabled: bool):
+        """Enable/disable input."""
+        state = "normal" if enabled else "disabled"
+        self.send_btn.configure(state=state)
+
+
+class ToolExecutionIndicator:
+    """Shows tool execution status inline."""
+    
+    def __init__(self, parent, theme: dict):
+        self.parent = parent
+        self.theme = theme
+        self.frame = None
+        self.status_label = None
+        self.start_time = None
+        self.animation_id = None
+    
+    def show(self, tool_name: str, action: str = ""):
+        """Show execution indicator."""
+        if not CTK_AVAILABLE:
+            return
+        
+        self.start_time = time.time()
+        
+        self.frame = ctk.CTkFrame(
+            self.parent,
+            fg_color=self.theme["tool_bg"],
+            corner_radius=8,
+            height=36
+        )
+        self.frame.pack(fill="x", padx=56, pady=4)
+        self.frame.pack_propagate(False)
+        
+        inner = ctk.CTkFrame(self.frame, fg_color="transparent")
+        inner.pack(fill="both", expand=True, padx=12)
+        
+        # Spinner
+        self.spinner_label = ctk.CTkLabel(
+            inner,
+            text="◐",
+            font=ctk.CTkFont(size=14),
+            text_color=self.theme["accent"],
+            width=20
+        )
+        self.spinner_label.pack(side="left")
+        
+        # Tool name
+        display_name = tool_name.replace("_", " ").title()
+        if action:
+            display_name += f" → {action}"
+        
         self.status_label = ctk.CTkLabel(
             inner,
-            text=f"{self.STATUS_ICONS['pending']} {self.tool_name}",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=self.STATUS_COLORS["pending"][1]
+            text=display_name,
+            font=ctk.CTkFont(size=12),
+            text_color=self.theme["text_secondary"]
         )
-        self.status_label.pack(side="left")
-        
-        # Action text
-        if self.action:
-            ctk.CTkLabel(
-                inner,
-                text=f"  →  {self.action[:40]}{'...' if len(self.action) > 40 else ''}",
-                font=ctk.CTkFont(size=11),
-                text_color=("#64748b", "#94a3b8")
-            ).pack(side="left")
+        self.status_label.pack(side="left", padx=8)
         
         # Duration
         self.duration_label = ctk.CTkLabel(
             inner,
             text="",
-            font=ctk.CTkFont(size=10),
-            text_color=("#94a3b8", "#64748b")
+            font=ctk.CTkFont(size=11),
+            text_color=self.theme["text_muted"]
         )
         self.duration_label.pack(side="right")
         
-        self.set_status("running")
+        self._animate_spinner()
     
-    def set_status(self, status: str, details: str = ""):
-        """Update the status."""
-        self.status = status
-        
-        if not self.frame or not CTK_AVAILABLE:
+    def _animate_spinner(self):
+        """Animate the spinner."""
+        if not self.frame or not self.spinner_label:
             return
         
         try:
-            icon = self.STATUS_ICONS.get(status, "○")
-            color = self.STATUS_COLORS.get(status, self.STATUS_COLORS["pending"])
+            spinners = ["◐", "◓", "◑", "◒"]
+            current = spinners.index(self.spinner_label.cget("text")) if self.spinner_label.cget("text") in spinners else 0
+            self.spinner_label.configure(text=spinners[(current + 1) % 4])
             
-            self.status_label.configure(
-                text=f"{icon} {self.tool_name}",
-                text_color=color[1]
-            )
+            # Update duration
+            if self.start_time and self.duration_label:
+                elapsed = int((time.time() - self.start_time) * 1000)
+                self.duration_label.configure(text=f"{elapsed}ms")
             
-            if status in ["success", "error"]:
-                duration = int((time.time() - self.start_time) * 1000)
-                self.duration_label.configure(text=f"{duration}ms")
+            self.animation_id = self.parent.after(100, self._animate_spinner)
         except Exception:
             pass
+    
+    def complete(self, success: bool = True):
+        """Mark as complete."""
+        if self.animation_id:
+            try:
+                self.parent.after_cancel(self.animation_id)
+            except Exception:
+                pass
+        
+        if not self.frame:
+            return
+        
+        try:
+            icon = "✓" if success else "✗"
+            color = self.theme["success"] if success else self.theme["error"]
+            self.spinner_label.configure(text=icon, text_color=color)
+            
+            # Final duration
+            if self.start_time:
+                elapsed = int((time.time() - self.start_time) * 1000)
+                self.duration_label.configure(text=f"{elapsed}ms")
+        except Exception:
+            pass
+    
+    def destroy(self):
+        """Remove indicator."""
+        if self.animation_id:
+            try:
+                self.parent.after_cancel(self.animation_id)
+            except Exception:
+                pass
+        if self.frame:
+            try:
+                self.frame.destroy()
+            except Exception:
+                pass
 
 
 class ChatInterface:
-    """Commercial-grade chat interface with streaming and smart features."""
-    
-    # Color scheme (light, dark)
-    COLORS = {
-        "bg": ("#ffffff", "#0f172a"),
-        "surface": ("#f8fafc", "#1e293b"),
-        "surface_alt": ("#f1f5f9", "#334155"),
-        "border": ("#e2e8f0", "#334155"),
-        "text": ("#0f172a", "#f8fafc"),
-        "text_secondary": ("#64748b", "#94a3b8"),
-        "accent": ("#3b82f6", "#60a5fa"),
-        "accent_hover": ("#2563eb", "#3b82f6"),
-        "user_bubble": ("#3b82f6", "#2563eb"),
-        "assistant_bubble": ("#f1f5f9", "#1e293b"),
-        "success": ("#10b981", "#34d399"),
-        "error": ("#ef4444", "#f87171"),
-        "warning": ("#f59e0b", "#fbbf24"),
-    }
+    """Cursor AI-style chat interface."""
     
     def __init__(self, parent, on_send: Optional[Callable[[str], None]] = None):
         """Initialize the chat interface."""
@@ -206,12 +482,10 @@ class ChatInterface:
         self.messages: List[ChatMessage] = []
         self.message_queue = queue.Queue()
         self.is_processing = False
-        self.command_history: List[str] = []
-        self.history_index = -1
         self.last_query = ""
-        self.current_tool_card: Optional[ToolExecutionCard] = None
-        self.thinking_animation: Optional[ThinkingAnimation] = None
+        self.current_tool_indicator: Optional[ToolExecutionIndicator] = None
         self.stream_data: Optional[Dict] = None
+        self.theme = THEME
         
         self._create_ui()
         self._start_queue_processor()
@@ -219,7 +493,7 @@ class ChatInterface:
     def _create_ui(self):
         """Create the main UI structure."""
         if CTK_AVAILABLE:
-            self.frame = ctk.CTkFrame(self.parent, fg_color="transparent")
+            self.frame = ctk.CTkFrame(self.parent, fg_color=self.theme["bg_primary"])
         else:
             self.frame = ttk.Frame(self.parent)
         self.frame.pack(fill="both", expand=True)
@@ -230,287 +504,109 @@ class ChatInterface:
         self._add_welcome_message()
     
     def _create_header(self):
-        """Create a sleek header."""
+        """Create a minimal header."""
         if not CTK_AVAILABLE:
-            header = ttk.Frame(self.frame)
-            header.pack(fill="x", pady=5)
-            ttk.Label(header, text="SysAgent", font=("", 14, "bold")).pack(side="left", padx=10)
             return
         
         header = ctk.CTkFrame(
             self.frame,
-            fg_color=self.COLORS["surface"],
+            fg_color=self.theme["bg_secondary"],
             corner_radius=0,
-            height=56
+            height=50
         )
         header.pack(fill="x")
         header.pack_propagate(False)
         
-        # Left section
+        # Left - Title
         left = ctk.CTkFrame(header, fg_color="transparent")
         left.pack(side="left", fill="y", padx=16)
         
-        # Logo and title
-        title_frame = ctk.CTkFrame(left, fg_color="transparent")
-        title_frame.pack(side="left", pady=12)
-        
         ctk.CTkLabel(
-            title_frame,
-            text="🧠",
-            font=ctk.CTkFont(size=24)
-        ).pack(side="left", padx=(0, 8))
+            left,
+            text="💬 Chat",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            text_color=self.theme["text_primary"]
+        ).pack(side="left", pady=12)
         
-        ctk.CTkLabel(
-            title_frame,
-            text="SysAgent",
-            font=ctk.CTkFont(size=18, weight="bold"),
-            text_color=self.COLORS["text"]
-        ).pack(side="left")
-        
-        # Status indicator
+        # Status
         self.status_frame = ctk.CTkFrame(left, fg_color="transparent")
-        self.status_frame.pack(side="left", padx=20)
+        self.status_frame.pack(side="left", padx=16)
         
         self.status_dot = ctk.CTkLabel(
             self.status_frame,
             text="●",
-            font=ctk.CTkFont(size=10),
-            text_color=self.COLORS["success"]
+            font=ctk.CTkFont(size=8),
+            text_color=self.theme["success"]
         )
         self.status_dot.pack(side="left")
         
         self.status_text = ctk.CTkLabel(
             self.status_frame,
             text="Ready",
-            font=ctk.CTkFont(size=12),
-            text_color=self.COLORS["text_secondary"]
+            font=ctk.CTkFont(size=11),
+            text_color=self.theme["text_muted"]
         )
         self.status_text.pack(side="left", padx=(4, 0))
         
-        # Right section - controls
+        # Right - Actions
         right = ctk.CTkFrame(header, fg_color="transparent")
         right.pack(side="right", fill="y", padx=16)
         
         btn_style = {
-            "width": 36,
-            "height": 36,
-            "corner_radius": 8,
+            "width": 32, "height": 32, "corner_radius": 6,
             "fg_color": "transparent",
-            "hover_color": self.COLORS["surface_alt"],
-            "font": ctk.CTkFont(size=16)
+            "hover_color": self.theme["bg_tertiary"],
+            "font": ctk.CTkFont(size=14)
         }
         
-        ctk.CTkButton(right, text="📤", command=self._export_chat, **btn_style).pack(side="left", padx=2)
-        ctk.CTkButton(right, text="🗑️", command=self.clear_chat, **btn_style).pack(side="left", padx=2)
+        ctk.CTkButton(right, text="🗑", command=self.clear_chat, **btn_style).pack(side="right", padx=2)
+        ctk.CTkButton(right, text="📤", command=self._export_chat, **btn_style).pack(side="right", padx=2)
     
     def _create_messages_area(self):
         """Create the scrollable messages area."""
         if not CTK_AVAILABLE:
             self.messages_frame = ttk.Frame(self.frame)
-            self.messages_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            self.messages_frame.pack(fill="both", expand=True)
             return
         
-        # Container with subtle border
-        container = ctk.CTkFrame(
-            self.frame,
-            fg_color=self.COLORS["bg"],
-            corner_radius=0
-        )
-        container.pack(fill="both", expand=True)
-        
-        # Scrollable frame for messages
         self.messages_frame = ctk.CTkScrollableFrame(
-            container,
-            fg_color="transparent",
+            self.frame,
+            fg_color=self.theme["bg_primary"],
             corner_radius=0
         )
-        self.messages_frame.pack(fill="both", expand=True, padx=0, pady=0)
+        self.messages_frame.pack(fill="both", expand=True)
     
     def _create_input_area(self):
         """Create the message input area."""
         if not CTK_AVAILABLE:
             input_frame = ttk.Frame(self.frame)
-            input_frame.pack(fill="x", padx=10, pady=10)
-            
+            input_frame.pack(fill="x", side="bottom")
             self.input_field = ttk.Entry(input_frame)
-            self.input_field.pack(side="left", fill="x", expand=True)
+            self.input_field.pack(fill="x", padx=10, pady=10)
             self.input_field.bind("<Return>", lambda e: self._send_message())
-            
-            ttk.Button(input_frame, text="Send", command=self._send_message).pack(side="right")
             return
         
-        # Input container
         input_container = ctk.CTkFrame(
             self.frame,
-            fg_color=self.COLORS["surface"],
-            corner_radius=0,
-            height=100
+            fg_color=self.theme["bg_secondary"],
+            corner_radius=0
         )
         input_container.pack(fill="x", side="bottom")
-        input_container.pack_propagate(False)
         
-        # Inner padding
-        inner = ctk.CTkFrame(input_container, fg_color="transparent")
-        inner.pack(fill="both", expand=True, padx=16, pady=12)
+        self.smart_input = SmartInput(input_container, self._send_message, self.theme)
+        self.smart_input.get_frame().pack(fill="x")
         
-        # Input field with border
-        input_wrapper = ctk.CTkFrame(
-            inner,
-            fg_color=self.COLORS["bg"],
-            corner_radius=12,
-            border_width=1,
-            border_color=self.COLORS["border"]
-        )
-        input_wrapper.pack(side="left", fill="both", expand=True, padx=(0, 12))
-        
-        # Text input
-        self.input_field = ctk.CTkTextbox(
-            input_wrapper,
-            height=60,
-            fg_color="transparent",
-            font=ctk.CTkFont(size=14),
-            wrap="word",
-            border_width=0
-        )
-        self.input_field.pack(fill="both", expand=True, padx=12, pady=8)
-        
-        # Placeholder
-        self._placeholder = "Ask me anything... (Enter to send, Shift+Enter for new line)"
-        self._show_placeholder()
-        
-        # Bindings
-        self.input_field.bind("<FocusIn>", self._on_focus_in)
-        self.input_field.bind("<FocusOut>", self._on_focus_out)
-        self.input_field.bind("<Return>", self._on_return)
-        self.input_field.bind("<Shift-Return>", lambda e: None)
-        self.input_field.bind("<Up>", self._on_history_up)
-        self.input_field.bind("<Down>", self._on_history_down)
-        
-        # Send button
-        self.send_btn = ctk.CTkButton(
-            inner,
-            text="Send",
-            width=80,
-            height=44,
-            corner_radius=10,
-            font=ctk.CTkFont(size=14, weight="bold"),
-            fg_color=self.COLORS["accent"],
-            hover_color=self.COLORS["accent_hover"],
-            command=self._send_message
-        )
-        self.send_btn.pack(side="right")
-        
-        # Quick actions
-        self._create_quick_actions(input_container)
+        # For backwards compatibility
+        self.input_field = self.smart_input.input_field
     
-    def _create_quick_actions(self, parent):
-        """Create quick action buttons."""
-        if not CTK_AVAILABLE:
+    def _send_message(self, content: str = None):
+        """Send a message."""
+        if content is None:
+            content = self.input_field.get("1.0", "end").strip()
+        
+        if not content or self.is_processing:
             return
         
-        actions_frame = ctk.CTkFrame(parent, fg_color="transparent", height=40)
-        actions_frame.pack(fill="x", side="bottom", padx=16, pady=(0, 8))
-        
-        actions = [
-            ("💻 System", "Show system status"),
-            ("📊 CPU", "Show CPU usage"),
-            ("🧠 Memory", "Show memory usage"),
-            ("💾 Disk", "Check disk space"),
-            ("🏥 Health", "Run system health check"),
-            ("🔍 Search", "Search for files"),
-        ]
-        
-        for text, cmd in actions:
-            btn = ctk.CTkButton(
-                actions_frame,
-                text=text,
-                height=28,
-                corner_radius=14,
-                font=ctk.CTkFont(size=11),
-                fg_color=self.COLORS["surface_alt"],
-                hover_color=self.COLORS["border"],
-                text_color=self.COLORS["text_secondary"],
-                command=lambda c=cmd: self._quick_send(c)
-            )
-            btn.pack(side="left", padx=3)
-    
-    def _show_placeholder(self):
-        """Show placeholder text."""
-        self._placeholder_active = True
-        if CTK_AVAILABLE:
-            self.input_field.delete("1.0", "end")
-            self.input_field.insert("1.0", self._placeholder)
-            self.input_field.configure(text_color=self.COLORS["text_secondary"][1])
-    
-    def _on_focus_in(self, event):
-        """Handle focus in."""
-        if self._placeholder_active:
-            self.input_field.delete("1.0", "end")
-            if CTK_AVAILABLE:
-                self.input_field.configure(text_color=self.COLORS["text"][1])
-            self._placeholder_active = False
-    
-    def _on_focus_out(self, event):
-        """Handle focus out."""
-        content = self.input_field.get("1.0", "end").strip()
-        if not content:
-            self._show_placeholder()
-    
-    def _on_return(self, event):
-        """Handle Enter key."""
-        if not (event.state & 0x1):  # Shift not pressed
-            self._send_message()
-            return "break"
-    
-    def _on_history_up(self, event):
-        """Navigate history up."""
-        if self.command_history and self.history_index < len(self.command_history) - 1:
-            self.history_index += 1
-            self._set_input_text(self.command_history[-(self.history_index + 1)])
-        return "break"
-    
-    def _on_history_down(self, event):
-        """Navigate history down."""
-        if self.history_index > 0:
-            self.history_index -= 1
-            self._set_input_text(self.command_history[-(self.history_index + 1)])
-        elif self.history_index == 0:
-            self.history_index = -1
-            self._set_input_text("")
-        return "break"
-    
-    def _set_input_text(self, text: str):
-        """Set input field text."""
-        self.input_field.delete("1.0", "end")
-        if text:
-            self.input_field.insert("1.0", text)
-            self._placeholder_active = False
-            if CTK_AVAILABLE:
-                self.input_field.configure(text_color=self.COLORS["text"][1])
-    
-    def _quick_send(self, message: str):
-        """Send a quick action."""
-        self._set_input_text(message)
-        self._send_message()
-    
-    def _send_message(self):
-        """Send the current message."""
-        content = self.input_field.get("1.0", "end").strip()
-        
-        if self._placeholder_active or not content or content == self._placeholder:
-            return
-        
-        if self.is_processing:
-            return
-        
-        # Clear input
-        self._set_input_text("")
-        self._show_placeholder()
-        
-        # Add to history
-        if content and (not self.command_history or self.command_history[-1] != content):
-            self.command_history.append(content)
-        self.history_index = -1
         self.last_query = content
         
         # Add user message
@@ -523,16 +619,22 @@ class ChatInterface:
         if self.on_send:
             self.on_send(content)
         else:
-            self._add_message("No agent connected. Configure API keys in Settings.", MessageType.ERROR)
+            self._add_message("No agent connected. Configure in Settings.", MessageType.ERROR)
             self._set_processing(False)
     
     def _send_message_direct(self, message: str):
         """Send a message directly (for external calls)."""
-        self._set_input_text(message)
-        self._send_message()
+        if hasattr(self, 'smart_input'):
+            self.smart_input.set_text(message)
+        self._send_message(message)
+    
+    def _set_input_text(self, text: str):
+        """Set input field text."""
+        if hasattr(self, 'smart_input'):
+            self.smart_input.set_text(text)
     
     def _set_processing(self, processing: bool):
-        """Set processing state with animation."""
+        """Set processing state."""
         self.is_processing = processing
         
         if not CTK_AVAILABLE:
@@ -540,68 +642,17 @@ class ChatInterface:
         
         try:
             if processing:
-                self.status_dot.configure(text_color=self.COLORS["warning"])
-                self.status_text.configure(text="Processing")
-                self.send_btn.configure(state="disabled", text="...")
-                
-                # Show thinking indicator
-                self._show_thinking_indicator()
+                self.status_dot.configure(text_color=self.theme["warning"])
+                self.status_text.configure(text="Thinking...")
+                if hasattr(self, 'smart_input'):
+                    self.smart_input.set_enabled(False)
             else:
-                self.status_dot.configure(text_color=self.COLORS["success"])
+                self.status_dot.configure(text_color=self.theme["success"])
                 self.status_text.configure(text="Ready")
-                self.send_btn.configure(state="normal", text="Send")
-                
-                # Hide thinking indicator
-                self._hide_thinking_indicator()
+                if hasattr(self, 'smart_input'):
+                    self.smart_input.set_enabled(True)
         except Exception:
             pass
-    
-    def _show_thinking_indicator(self):
-        """Show animated thinking indicator."""
-        if not CTK_AVAILABLE:
-            return
-        
-        try:
-            self.thinking_frame = ctk.CTkFrame(
-                self.messages_frame,
-                fg_color="transparent"
-            )
-            self.thinking_frame.pack(fill="x", padx=16, pady=8)
-            
-            bubble = ctk.CTkFrame(
-                self.thinking_frame,
-                fg_color=self.COLORS["assistant_bubble"],
-                corner_radius=16
-            )
-            bubble.pack(anchor="w", padx=40)
-            
-            self.thinking_label = ctk.CTkLabel(
-                bubble,
-                text="⠋ Thinking...",
-                font=ctk.CTkFont(size=13),
-                text_color=self.COLORS["text_secondary"]
-            )
-            self.thinking_label.pack(padx=16, pady=12)
-            
-            self.thinking_animation = ThinkingAnimation(self.parent, self.thinking_label)
-            self.thinking_animation.start("Thinking")
-            
-            self._scroll_to_bottom()
-        except Exception:
-            pass
-    
-    def _hide_thinking_indicator(self):
-        """Hide thinking indicator."""
-        if self.thinking_animation:
-            self.thinking_animation.stop()
-            self.thinking_animation = None
-        
-        if hasattr(self, 'thinking_frame') and self.thinking_frame:
-            try:
-                self.thinking_frame.destroy()
-            except Exception:
-                pass
-            self.thinking_frame = None
     
     def _add_message(self, content: str, msg_type: MessageType, **kwargs):
         """Add a message to the chat."""
@@ -610,11 +661,8 @@ class ChatInterface:
         self._render_message(message)
     
     def _render_message(self, message: ChatMessage):
-        """Render a message in the UI."""
+        """Render a message."""
         if not CTK_AVAILABLE:
-            # Basic tkinter fallback
-            label = ttk.Label(self.messages_frame, text=message.content, wraplength=400)
-            label.pack(anchor="e" if message.msg_type == MessageType.USER else "w", padx=10, pady=5)
             return
         
         try:
@@ -623,9 +671,8 @@ class ChatInterface:
         except Exception:
             return
         
-        # Container
         container = ctk.CTkFrame(self.messages_frame, fg_color="transparent")
-        container.pack(fill="x", padx=16, pady=6)
+        container.pack(fill="x", padx=16, pady=8)
         
         if message.msg_type == MessageType.USER:
             self._render_user_message(container, message)
@@ -635,42 +682,33 @@ class ChatInterface:
             self._render_error_message(container, message)
         elif message.msg_type == MessageType.SYSTEM:
             self._render_system_message(container, message)
-        elif message.msg_type == MessageType.TOOL:
-            self._render_tool_message(container, message)
         
         self._scroll_to_bottom()
     
     def _render_user_message(self, container, message: ChatMessage):
         """Render a user message."""
-        # Right-aligned bubble
+        # Right-aligned
+        row = ctk.CTkFrame(container, fg_color="transparent")
+        row.pack(anchor="e")
+        
         bubble = ctk.CTkFrame(
-            container,
-            fg_color=self.COLORS["user_bubble"],
+            row,
+            fg_color=self.theme["user_bubble"],
             corner_radius=16
         )
-        bubble.pack(anchor="e", padx=0)
+        bubble.pack(anchor="e")
         
-        # Content
         ctk.CTkLabel(
             bubble,
             text=message.content,
             font=ctk.CTkFont(size=14),
             text_color="white",
-            wraplength=450,
+            wraplength=500,
             justify="right"
-        ).pack(padx=16, pady=12)
-        
-        # Timestamp
-        ctk.CTkLabel(
-            container,
-            text=message.timestamp.strftime("%H:%M"),
-            font=ctk.CTkFont(size=10),
-            text_color=self.COLORS["text_secondary"]
-        ).pack(anchor="e", padx=4, pady=(2, 0))
+        ).pack(padx=16, pady=10)
     
     def _render_assistant_message(self, container, message: ChatMessage):
-        """Render an assistant message with markdown support."""
-        # Left-aligned with avatar
+        """Render an assistant message."""
         row = ctk.CTkFrame(container, fg_color="transparent")
         row.pack(anchor="w", fill="x")
         
@@ -678,55 +716,36 @@ class ChatInterface:
         ctk.CTkLabel(
             row,
             text="🧠",
-            font=ctk.CTkFont(size=28),
-            width=40
+            font=ctk.CTkFont(size=24),
+            width=36
         ).pack(side="left", anchor="n", padx=(0, 8))
         
-        # Message content
+        # Content
         content_frame = ctk.CTkFrame(row, fg_color="transparent")
         content_frame.pack(side="left", fill="x", expand=True)
         
-        # Bubble
-        bubble = ctk.CTkFrame(
-            content_frame,
-            fg_color=self.COLORS["assistant_bubble"],
-            corner_radius=16
-        )
-        bubble.pack(anchor="w")
+        # Parse markdown
+        self._render_markdown(content_frame, message.content)
         
-        # Parse and render markdown
-        self._render_markdown_content(bubble, message.content)
-        
-        # Actions row
+        # Actions
         actions = ctk.CTkFrame(content_frame, fg_color="transparent")
-        actions.pack(anchor="w", pady=(4, 0))
+        actions.pack(anchor="w", pady=(8, 0))
         
-        # Timestamp
-        ctk.CTkLabel(
-            actions,
-            text=message.timestamp.strftime("%H:%M"),
-            font=ctk.CTkFont(size=10),
-            text_color=self.COLORS["text_secondary"]
-        ).pack(side="left")
-        
-        # Action buttons
         btn_style = {
-            "width": 28, "height": 22, "corner_radius": 6,
-            "font": ctk.CTkFont(size=11),
+            "width": 28, "height": 24, "corner_radius": 4,
+            "font": ctk.CTkFont(size=12),
             "fg_color": "transparent",
-            "hover_color": self.COLORS["surface_alt"],
-            "text_color": self.COLORS["text_secondary"]
+            "hover_color": self.theme["bg_tertiary"],
+            "text_color": self.theme["text_muted"]
         }
         
-        ctk.CTkButton(actions, text="📋", command=lambda: self._copy_to_clipboard(message.content), **btn_style).pack(side="left", padx=2)
-        ctk.CTkButton(actions, text="💾", command=lambda: self._save_to_file(message.content), **btn_style).pack(side="left", padx=2)
+        ctk.CTkButton(actions, text="📋", command=lambda: self._copy_text(message.content), **btn_style).pack(side="left", padx=2)
         ctk.CTkButton(actions, text="🔄", command=self._retry_last, **btn_style).pack(side="left", padx=2)
         
-        # Add follow-up suggestions
-        if self.last_query:
-            self._add_followups(content_frame, message.content)
+        # Follow-ups
+        self._add_followups(content_frame)
     
-    def _render_markdown_content(self, parent, content: str):
+    def _render_markdown(self, parent, content: str):
         """Render markdown content."""
         # Split by code blocks
         code_pattern = r'```(\w*)\n?([\s\S]*?)```'
@@ -736,19 +755,18 @@ class ChatInterface:
         while i < len(parts):
             text_part = parts[i].strip()
             if text_part:
-                # Clean markdown formatting
+                # Simple markdown cleanup
                 text_part = re.sub(r'\*\*(.+?)\*\*', r'\1', text_part)
                 text_part = re.sub(r'\*(.+?)\*', r'\1', text_part)
-                text_part = re.sub(r'`(.+?)`', r'[\1]', text_part)
                 
                 ctk.CTkLabel(
                     parent,
                     text=text_part,
                     font=ctk.CTkFont(size=14),
-                    text_color=self.COLORS["text"],
-                    wraplength=500,
+                    text_color=self.theme["text_primary"],
+                    wraplength=550,
                     justify="left"
-                ).pack(anchor="w", padx=16, pady=8)
+                ).pack(anchor="w", pady=4)
             
             i += 1
             
@@ -760,21 +778,21 @@ class ChatInterface:
                 if code:
                     code_frame = ctk.CTkFrame(
                         parent,
-                        fg_color=("#1e293b", "#0f172a"),
+                        fg_color=self.theme["code_bg"],
                         corner_radius=8
                     )
-                    code_frame.pack(fill="x", padx=12, pady=4)
+                    code_frame.pack(fill="x", pady=6)
                     
-                    # Header with language and copy button
+                    # Header
                     header = ctk.CTkFrame(code_frame, fg_color="transparent")
-                    header.pack(fill="x", padx=12, pady=(8, 4))
+                    header.pack(fill="x", padx=12, pady=(8, 0))
                     
                     if lang:
                         ctk.CTkLabel(
                             header,
                             text=lang,
                             font=ctk.CTkFont(size=10),
-                            text_color="#64748b"
+                            text_color=self.theme["text_muted"]
                         ).pack(side="left")
                     
                     ctk.CTkButton(
@@ -784,20 +802,20 @@ class ChatInterface:
                         height=20,
                         corner_radius=4,
                         font=ctk.CTkFont(size=10),
-                        fg_color="#334155",
-                        hover_color="#475569",
-                        command=lambda c=code: self._copy_to_clipboard(c)
+                        fg_color=self.theme["bg_tertiary"],
+                        hover_color=self.theme["border"],
+                        command=lambda c=code: self._copy_text(c)
                     ).pack(side="right")
                     
-                    # Code content
+                    # Code
                     ctk.CTkLabel(
                         code_frame,
                         text=code,
                         font=ctk.CTkFont(size=12, family="Consolas"),
-                        text_color="#e2e8f0",
-                        wraplength=480,
+                        text_color=self.theme["text_primary"],
+                        wraplength=530,
                         justify="left"
-                    ).pack(anchor="w", padx=12, pady=(0, 12))
+                    ).pack(anchor="w", padx=12, pady=(4, 12))
                 
                 i += 2
     
@@ -805,18 +823,18 @@ class ChatInterface:
         """Render an error message."""
         bubble = ctk.CTkFrame(
             container,
-            fg_color=("#fef2f2", "#450a0a"),
+            fg_color=self.theme["bg_secondary"],
             corner_radius=12,
             border_width=1,
-            border_color=self.COLORS["error"]
+            border_color=self.theme["error"]
         )
-        bubble.pack(anchor="w", padx=40)
+        bubble.pack(anchor="w", padx=44)
         
         ctk.CTkLabel(
             bubble,
-            text=f"❌ {message.content}",
+            text=f"⚠️ {message.content}",
             font=ctk.CTkFont(size=13),
-            text_color=self.COLORS["error"],
+            text_color=self.theme["error"],
             wraplength=500
         ).pack(padx=16, pady=12)
     
@@ -824,76 +842,65 @@ class ChatInterface:
         """Render a system message."""
         bubble = ctk.CTkFrame(
             container,
-            fg_color=self.COLORS["surface_alt"],
+            fg_color=self.theme["bg_secondary"],
             corner_radius=12
         )
-        bubble.pack(fill="x", padx=40)
+        bubble.pack(fill="x", padx=44)
         
         ctk.CTkLabel(
             bubble,
             text=message.content,
             font=ctk.CTkFont(size=13),
-            text_color=self.COLORS["text_secondary"],
-            wraplength=500,
+            text_color=self.theme["text_secondary"],
+            wraplength=550,
             justify="left"
-        ).pack(padx=20, pady=16)
+        ).pack(padx=16, pady=16)
     
-    def _render_tool_message(self, container, message: ChatMessage):
-        """Render a tool execution message."""
-        # This is handled by ToolExecutionCard
-        pass
-    
-    def _add_followups(self, parent, response: str):
-        """Add follow-up suggestion buttons."""
-        suggestions = self._generate_followups(self.last_query, response)
+    def _add_followups(self, parent):
+        """Add smart follow-up suggestions."""
+        suggestions = self._generate_followups()
         if not suggestions:
             return
         
-        followup_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        followup_frame.pack(anchor="w", pady=(8, 0))
-        
-        ctk.CTkLabel(
-            followup_frame,
-            text="💡",
-            font=ctk.CTkFont(size=12),
-            text_color=self.COLORS["text_secondary"]
-        ).pack(side="left", padx=(0, 6))
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.pack(anchor="w", pady=(8, 0))
         
         for suggestion in suggestions[:3]:
             btn = ctk.CTkButton(
-                followup_frame,
+                frame,
                 text=suggestion,
-                height=26,
-                corner_radius=13,
+                height=28,
+                corner_radius=14,
                 font=ctk.CTkFont(size=11),
-                fg_color=self.COLORS["surface_alt"],
-                hover_color=self.COLORS["border"],
-                text_color=self.COLORS["accent"],
-                command=lambda s=suggestion: self._quick_send(s)
+                fg_color=self.theme["bg_tertiary"],
+                hover_color=self.theme["border"],
+                text_color=self.theme["accent"],
+                command=lambda s=suggestion: self._send_message_direct(s)
             )
             btn.pack(side="left", padx=3)
     
-    def _generate_followups(self, query: str, response: str) -> List[str]:
-        """Generate follow-up suggestions."""
-        suggestions = []
-        combined = (query + " " + response).lower()
+    def _generate_followups(self) -> List[str]:
+        """Generate smart follow-up suggestions."""
+        if not self.last_query:
+            return []
+        
+        query_lower = self.last_query.lower()
         
         patterns = {
-            "cpu": ["Show top CPU processes", "Monitor CPU"],
-            "memory": ["Show memory hogs", "Clear cache"],
+            "cpu": ["Show top CPU processes", "Monitor CPU usage"],
+            "memory": ["Clear memory cache", "Find memory hogs"],
             "disk": ["Find large files", "Clean temp files"],
             "process": ["Kill process", "Monitor process"],
-            "system": ["Check health", "Show processes"],
-            "file": ["Search files", "List directory"],
+            "system": ["Run health check", "Show all stats"],
+            "file": ["Search content", "Organize files"],
             "git": ["Git log", "Git diff"],
-            "network": ["Check connectivity", "Show ports"],
+            "network": ["Check ports", "Test connectivity"],
         }
         
+        suggestions = []
         for key, sug in patterns.items():
-            if key in combined:
-                suggestions.extend(sug[:2])
-                if len(suggestions) >= 3:
-                    break
+            if key in query_lower:
+                suggestions.extend(sug)
         
         return suggestions[:3]
     
@@ -908,41 +915,28 @@ class ChatInterface:
         except Exception:
             return None
         
-        # Hide thinking indicator
-        self._hide_thinking_indicator()
-        
-        # Container
         container = ctk.CTkFrame(self.messages_frame, fg_color="transparent")
-        container.pack(fill="x", padx=16, pady=6)
+        container.pack(fill="x", padx=16, pady=8)
         
         row = ctk.CTkFrame(container, fg_color="transparent")
         row.pack(anchor="w", fill="x")
         
         # Avatar
-        ctk.CTkLabel(row, text="🧠", font=ctk.CTkFont(size=28), width=40).pack(side="left", anchor="n", padx=(0, 8))
-        
-        # Bubble
-        bubble = ctk.CTkFrame(
-            row,
-            fg_color=self.COLORS["assistant_bubble"],
-            corner_radius=16
-        )
-        bubble.pack(side="left")
+        ctk.CTkLabel(row, text="🧠", font=ctk.CTkFont(size=24), width=36).pack(side="left", anchor="n", padx=(0, 8))
         
         # Content label
         content_label = ctk.CTkLabel(
-            bubble,
+            row,
             text="▌",
             font=ctk.CTkFont(size=14),
-            text_color=self.COLORS["text"],
-            wraplength=500,
+            text_color=self.theme["text_primary"],
+            wraplength=550,
             justify="left"
         )
-        content_label.pack(padx=16, pady=12)
+        content_label.pack(side="left", anchor="w")
         
         self.stream_data = {
             "container": container,
-            "bubble": bubble,
             "label": content_label,
             "content": ""
         }
@@ -951,7 +945,7 @@ class ChatInterface:
         return self.stream_data
     
     def update_streaming_message(self, stream_data: Dict, token: str):
-        """Update streaming message with new token."""
+        """Update streaming message."""
         if not stream_data or "label" not in stream_data:
             return
         
@@ -964,26 +958,19 @@ class ChatInterface:
     
     def finish_streaming_message(self, stream_data: Dict):
         """Finalize streaming message."""
-        if not stream_data or "label" not in stream_data:
+        if not stream_data:
             return
         
         try:
-            # Remove cursor
             stream_data["label"].configure(text=stream_data["content"])
-            
-            # Store as message
-            self.messages.append(ChatMessage(
-                content=stream_data["content"],
-                msg_type=MessageType.ASSISTANT
-            ))
-            
+            self.messages.append(ChatMessage(content=stream_data["content"], msg_type=MessageType.ASSISTANT))
             self._set_processing(False)
         except Exception:
             pass
     
     def add_execution_log(self, tool_name: str, action: str = "", status: str = "running",
                           duration_ms: int = 0, details: str = ""):
-        """Add a tool execution log."""
+        """Add tool execution log."""
         if not CTK_AVAILABLE:
             return
         
@@ -993,14 +980,12 @@ class ChatInterface:
         except Exception:
             return
         
-        # Update or create card
-        if status == "running" and not self.current_tool_card:
-            self._hide_thinking_indicator()
-            self.current_tool_card = ToolExecutionCard(self.messages_frame, tool_name, action or details)
-        elif self.current_tool_card:
-            self.current_tool_card.set_status(status, details)
-            if status in ["success", "error"]:
-                self.current_tool_card = None
+        if status == "running" and not self.current_tool_indicator:
+            self.current_tool_indicator = ToolExecutionIndicator(self.messages_frame, self.theme)
+            self.current_tool_indicator.show(tool_name, action or details)
+        elif self.current_tool_indicator:
+            self.current_tool_indicator.complete(status == "success")
+            self.current_tool_indicator = None
         
         self._scroll_to_bottom()
     
@@ -1018,7 +1003,6 @@ class ChatInterface:
             try:
                 while True:
                     content, msg_type = self.message_queue.get_nowait()
-                    self._hide_thinking_indicator()
                     self._add_message(content, msg_type)
                     if msg_type != MessageType.USER:
                         self._set_processing(False)
@@ -1039,17 +1023,17 @@ class ChatInterface:
     
     def _add_welcome_message(self):
         """Add welcome message."""
-        welcome = """Welcome to SysAgent! 🎉
+        welcome = """👋 Welcome to SysAgent!
 
-I'm your intelligent system assistant. I can help you with:
+I can help you with system monitoring, file management, automation, and more.
 
-📊 **System Monitoring** - CPU, memory, disk, processes
-📁 **File Management** - Search, organize, cleanup
-🔧 **Automation** - Workflows, scheduled tasks
-🔍 **Smart Search** - Find files, apps, commands
-🏥 **Health Checks** - System diagnostics & recommendations
+Try asking me something like:
+• "Show system status"
+• "Check disk usage"
+• "Run health check"
+• "Search for large files"
 
-Just ask me anything in natural language!"""
+Just type below to get started!"""
         
         self._add_message(welcome, MessageType.SYSTEM)
     
@@ -1061,8 +1045,8 @@ Just ask me anything in natural language!"""
         except Exception:
             pass
     
-    def _copy_to_clipboard(self, text: str):
-        """Copy to clipboard."""
+    def _copy_text(self, text: str):
+        """Copy text to clipboard."""
         try:
             self.parent.clipboard_clear()
             self.parent.clipboard_append(text)
@@ -1070,27 +1054,13 @@ Just ask me anything in natural language!"""
         except Exception:
             pass
     
-    def _save_to_file(self, content: str):
-        """Save content to file."""
-        file_path = filedialog.asksaveasfilename(
-            defaultextension=".txt",
-            filetypes=[("Text", "*.txt"), ("Markdown", "*.md"), ("All", "*.*")]
-        )
-        if file_path:
-            try:
-                with open(file_path, "w") as f:
-                    f.write(content)
-                self._show_toast("Saved!")
-            except Exception as e:
-                messagebox.showerror("Error", str(e))
-    
     def _retry_last(self):
         """Retry last message."""
-        if self.command_history:
-            self._quick_send(self.command_history[-1])
+        if self.last_query:
+            self._send_message_direct(self.last_query)
     
     def _export_chat(self):
-        """Export chat history."""
+        """Export chat."""
         file_path = filedialog.asksaveasfilename(
             defaultextension=".md",
             filetypes=[("Markdown", "*.md"), ("Text", "*.txt")]
@@ -1098,31 +1068,30 @@ Just ask me anything in natural language!"""
         if file_path:
             try:
                 with open(file_path, "w") as f:
-                    f.write("# SysAgent Chat Export\n\n")
+                    f.write("# SysAgent Chat\n\n")
                     for msg in self.messages:
                         role = "You" if msg.msg_type == MessageType.USER else "SysAgent"
-                        f.write(f"**{role}** ({msg.timestamp.strftime('%H:%M')}):\n")
-                        f.write(f"{msg.content}\n\n---\n\n")
+                        f.write(f"**{role}**: {msg.content}\n\n")
                 self._show_toast("Exported!")
             except Exception as e:
                 messagebox.showerror("Error", str(e))
     
     def _show_toast(self, message: str):
-        """Show brief toast notification."""
+        """Show toast."""
         if CTK_AVAILABLE:
             try:
                 self.status_text.configure(text=message)
-                self.parent.after(1500, lambda: self.status_text.configure(text="Ready"))
+                self.parent.after(2000, lambda: self.status_text.configure(text="Ready"))
             except Exception:
                 pass
     
     def clear_chat(self):
-        """Clear all messages."""
+        """Clear chat."""
         try:
             for widget in self.messages_frame.winfo_children():
                 widget.destroy()
             self.messages.clear()
-            self._add_message("Chat cleared. How can I help you?", MessageType.SYSTEM)
+            self._add_message("Chat cleared. How can I help?", MessageType.SYSTEM)
         except Exception:
             pass
     
@@ -1171,13 +1140,18 @@ class ChatWindow:
     def _on_message(self, message: str):
         """Handle message."""
         if self.agent:
-            try:
-                result = self.agent.process_command(message)
-                response = result.get('message', 'Done')
-                msg_type = "text" if result.get('success') else "error"
-                self.chat.add_message(response, is_user=False, message_type=msg_type)
-            except Exception as e:
-                self.chat.add_message(f"Error: {e}", is_user=False, message_type="error")
+            def process():
+                try:
+                    result = self.agent.process_command(message)
+                    response = result.get('message', 'Done')
+                    msg_type = "text" if result.get('success') else "error"
+                    self.chat.add_message(response, is_user=False, message_type=msg_type)
+                except Exception as e:
+                    self.chat.add_message(f"Error: {e}", is_user=False, message_type="error")
+            
+            import threading
+            thread = threading.Thread(target=process, daemon=True)
+            thread.start()
         else:
             self.chat.add_message("Agent not available", is_user=False, message_type="error")
     
