@@ -34,6 +34,9 @@ class DashboardWindow:
         self.tool_executor = None
         self.update_thread = None
         self.running = False
+        self.content_frames = {}  # Initialize empty dict
+        self.sidebar = None
+        self.content = None
         self._initialize_managers()
 
     def _initialize_managers(self):
@@ -216,6 +219,8 @@ class DashboardWindow:
 
     def _clear_content(self):
         """Clear the current content frame."""
+        if not self.content_frames:
+            return
         for frame in self.content_frames.values():
             frame.pack_forget()
 

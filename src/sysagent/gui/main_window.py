@@ -12,6 +12,12 @@ try:
 except ImportError:
     USE_CUSTOMTKINTER = False
 
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+
 
 class MainWindow:
     """Main application window combining dashboard and settings."""
@@ -485,18 +491,251 @@ Python: {platform.python_version()}
 
     def _view_processes(self):
         """View processes."""
-        messagebox.showinfo("Processes", "Opening Process Manager...")
-        from .dashboard import DashboardWindow
-        dash = DashboardWindow()
-        dash._show_processes()
+        self._show_process_list()
+
+    def _show_process_list(self):
+        """Show process list in a new window."""
+        if not PSUTIL_AVAILABLE:
+            messagebox.showerror("Error", "psutil is required for process management")
+            return
+        
+        # Create a new window
+        if USE_CUSTOMTKINTER:
+            proc_window = ctk.CTkToplevel(self.root)
+        else:
+            proc_window = tk.Toplevel(self.root)
+        
+        proc_window.title("Process Manager")
+        proc_window.geometry("800x600")
+        
+        # Create treeview for processes
+        columns = ("PID", "Name", "CPU %", "Memory %", "Status")
+        
+        if USE_CUSTOMTKINTER:
+            # Frame for treeview
+            tree_frame = ctk.CTkFrame(proc_window)
+            tree_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            # Use ttk.Treeview inside customtkinter
+            tree = ttk.Treeview(tree_frame, columns=columns, show="headings")
+        else:
+            tree_frame = ttk.Frame(proc_window)
+            tree_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            tree = ttk.Treeview(tree_frame, columns=columns, show="headings")
+        
+        # Configure columns
+        for col in columns:
+            tree.heading(col, text=col)
+            tree.column(col, width=100 if col != "Name" else 200)
+        
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        tree.pack(fill="both", expand=True)
+        
+        # Populate processes
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'status']):
+                try:
+                    info = proc.info
+                    tree.insert("", "end", values=(
+                        info['pid'],
+                        info['name'][:30] if info['name'] else "N/A",
+                        f"{info['cpu_percent']:.1f}" if info['cpu_percent'] else "0.0",
+                        f"{info['memory_percent']:.1f}" if info['memory_percent'] else "0.0",
+                        info['status'] if info['status'] else "N/A"
+                    ))
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to list processes: {e}")
+        
+        # Buttons frame
+        if USE_CUSTOMTKINTER:
+            btn_frame = ctk.CTkFrame(proc_window)
+            btn_frame.pack(fill="x", padx=10, pady=10)
+            
+            refresh_btn = ctk.CTkButton(btn_frame, text="Refresh", command=lambda: self._refresh_processes(tree))
+            refresh_btn.pack(side="left", padx=5)
+            
+            kill_btn = ctk.CTkButton(btn_frame, text="Kill Process", command=lambda: self._kill_selected_process(tree), fg_color="red")
+            kill_btn.pack(side="left", padx=5)
+        else:
+            btn_frame = ttk.Frame(proc_window)
+            btn_frame.pack(fill="x", padx=10, pady=10)
+            
+            ttk.Button(btn_frame, text="Refresh", command=lambda: self._refresh_processes(tree)).pack(side="left", padx=5)
+            ttk.Button(btn_frame, text="Kill Process", command=lambda: self._kill_selected_process(tree)).pack(side="left", padx=5)
+
+    def _refresh_processes(self, tree):
+        """Refresh process list."""
+        # Clear existing items
+        for item in tree.get_children():
+            tree.delete(item)
+        
+        # Repopulate
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'status']):
+                try:
+                    info = proc.info
+                    tree.insert("", "end", values=(
+                        info['pid'],
+                        info['name'][:30] if info['name'] else "N/A",
+                        f"{info['cpu_percent']:.1f}" if info['cpu_percent'] else "0.0",
+                        f"{info['memory_percent']:.1f}" if info['memory_percent'] else "0.0",
+                        info['status'] if info['status'] else "N/A"
+                    ))
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to refresh: {e}")
+
+    def _kill_selected_process(self, tree):
+        """Kill the selected process."""
+        selected = tree.selection()
+        if not selected:
+            messagebox.showwarning("Warning", "Please select a process to kill")
+            return
+        
+        item = tree.item(selected[0])
+        pid = int(item['values'][0])
+        name = item['values'][1]
+        
+        if messagebox.askyesno("Confirm", f"Kill process {name} (PID: {pid})?"):
+            try:
+                proc = psutil.Process(pid)
+                proc.terminate()
+                messagebox.showinfo("Success", f"Process {name} terminated")
+                self._refresh_processes(tree)
+            except psutil.NoSuchProcess:
+                messagebox.showinfo("Info", "Process no longer exists")
+                self._refresh_processes(tree)
+            except psutil.AccessDenied:
+                messagebox.showerror("Error", "Access denied. Try running with elevated privileges.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to kill process: {e}")
 
     def _view_files(self):
         """View files."""
-        messagebox.showinfo("Files", "Opening File Browser...")
+        self._show_file_browser()
+
+    def _show_file_browser(self):
+        """Show a simple file browser."""
+        from pathlib import Path
+        
+        if USE_CUSTOMTKINTER:
+            file_window = ctk.CTkToplevel(self.root)
+        else:
+            file_window = tk.Toplevel(self.root)
+        
+        file_window.title("File Browser")
+        file_window.geometry("600x500")
+        
+        current_path = Path.home()
+        
+        # Path entry
+        if USE_CUSTOMTKINTER:
+            path_frame = ctk.CTkFrame(file_window)
+            path_frame.pack(fill="x", padx=10, pady=10)
+            path_entry = ctk.CTkEntry(path_frame, width=400)
+            path_entry.pack(side="left", padx=5)
+            path_entry.insert(0, str(current_path))
+        else:
+            path_frame = ttk.Frame(file_window)
+            path_frame.pack(fill="x", padx=10, pady=10)
+            path_entry = ttk.Entry(path_frame, width=50)
+            path_entry.pack(side="left", padx=5)
+            path_entry.insert(0, str(current_path))
+        
+        # File list
+        file_list = tk.Listbox(file_window, font=("Courier", 10))
+        file_list.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        def refresh_files():
+            path = Path(path_entry.get())
+            file_list.delete(0, tk.END)
+            
+            if path.exists() and path.is_dir():
+                file_list.insert(tk.END, "..")
+                try:
+                    for item in sorted(path.iterdir()):
+                        prefix = "[D] " if item.is_dir() else "[F] "
+                        file_list.insert(tk.END, prefix + item.name)
+                except PermissionError:
+                    file_list.insert(tk.END, "(Permission Denied)")
+        
+        def on_double_click(event):
+            selection = file_list.curselection()
+            if selection:
+                item = file_list.get(selection[0])
+                if item == "..":
+                    new_path = Path(path_entry.get()).parent
+                elif item.startswith("[D] "):
+                    new_path = Path(path_entry.get()) / item[4:]
+                else:
+                    return
+                path_entry.delete(0, tk.END)
+                path_entry.insert(0, str(new_path))
+                refresh_files()
+        
+        file_list.bind("<Double-Button-1>", on_double_click)
+        refresh_files()
 
     def _view_network(self):
         """View network."""
-        messagebox.showinfo("Network", "Opening Network Info...")
+        self._show_network_info()
+
+    def _show_network_info(self):
+        """Show network information."""
+        if USE_CUSTOMTKINTER:
+            net_window = ctk.CTkToplevel(self.root)
+        else:
+            net_window = tk.Toplevel(self.root)
+        
+        net_window.title("Network Information")
+        net_window.geometry("600x400")
+        
+        # Text area for network info
+        if USE_CUSTOMTKINTER:
+            text_frame = ctk.CTkFrame(net_window)
+            text_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            text = tk.Text(text_frame, font=("Courier", 10), wrap="word")
+        else:
+            text_frame = ttk.Frame(net_window)
+            text_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            text = tk.Text(text_frame, font=("Courier", 10), wrap="word")
+        
+        text.pack(fill="both", expand=True)
+        
+        # Get network info
+        import socket
+        info = []
+        
+        try:
+            hostname = socket.gethostname()
+            info.append(f"Hostname: {hostname}")
+            info.append(f"Local IP: {socket.gethostbyname(hostname)}")
+        except:
+            info.append("Could not get hostname/IP")
+        
+        if PSUTIL_AVAILABLE:
+            info.append("\nNetwork Interfaces:")
+            for iface, addrs in psutil.net_if_addrs().items():
+                info.append(f"\n  {iface}:")
+                for addr in addrs:
+                    if addr.family == socket.AF_INET:
+                        info.append(f"    IPv4: {addr.address}")
+                    elif addr.family == socket.AF_INET6:
+                        info.append(f"    IPv6: {addr.address}")
+            
+            info.append("\nNetwork I/O:")
+            net_io = psutil.net_io_counters()
+            info.append(f"  Bytes Sent: {net_io.bytes_sent / (1024*1024):.2f} MB")
+            info.append(f"  Bytes Received: {net_io.bytes_recv / (1024*1024):.2f} MB")
+        
+        text.insert("1.0", "\n".join(info))
+        text.config(state="disabled")
 
     def _clean_temp(self):
         """Clean temp files."""
