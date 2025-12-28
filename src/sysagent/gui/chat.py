@@ -294,6 +294,135 @@ class ReasoningPanel:
         self.steps_frame = None
 
 
+class ApprovalDialog:
+    """Dialog for human-in-the-loop approvals."""
+    
+    def __init__(self, parent, colors: dict, title: str, description: str,
+                 on_approve: Callable, on_deny: Callable, options: List[str] = None):
+        self.parent = parent
+        self.colors = colors
+        self.title = title
+        self.description = description
+        self.on_approve = on_approve
+        self.on_deny = on_deny
+        self.options = options or ["Approve", "Deny"]
+        self.frame = None
+        self.result = None
+        
+        self._show()
+    
+    def _show(self):
+        """Show approval dialog."""
+        if not CTK_AVAILABLE:
+            return
+        
+        self.frame = ctk.CTkFrame(
+            self.parent,
+            fg_color=self.colors["bg_secondary"],
+            corner_radius=12,
+            border_width=2,
+            border_color=self.colors["warning"]
+        )
+        self.frame.pack(fill="x", padx=16, pady=12)
+        
+        # Header
+        header = ctk.CTkFrame(self.frame, fg_color="transparent")
+        header.pack(fill="x", padx=16, pady=(12, 8))
+        
+        ctk.CTkLabel(
+            header,
+            text="⚠️ Approval Required",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=self.colors["warning"]
+        ).pack(side="left")
+        
+        # Content
+        content = ctk.CTkFrame(self.frame, fg_color="transparent")
+        content.pack(fill="x", padx=16, pady=(0, 8))
+        
+        ctk.CTkLabel(
+            content,
+            text=self.title,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=self.colors["text"]
+        ).pack(anchor="w")
+        
+        ctk.CTkLabel(
+            content,
+            text=self.description,
+            font=ctk.CTkFont(size=12),
+            text_color=self.colors["text_secondary"],
+            wraplength=450
+        ).pack(anchor="w", pady=(4, 0))
+        
+        # Buttons
+        buttons = ctk.CTkFrame(self.frame, fg_color="transparent")
+        buttons.pack(fill="x", padx=16, pady=(8, 12))
+        
+        # Remember checkbox
+        self.remember_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            buttons,
+            text="Remember my choice",
+            variable=self.remember_var,
+            font=ctk.CTkFont(size=11),
+            text_color=self.colors["text_muted"],
+            checkbox_height=18,
+            checkbox_width=18
+        ).pack(side="left")
+        
+        # Deny button
+        ctk.CTkButton(
+            buttons,
+            text=self.options[1] if len(self.options) > 1 else "Deny",
+            width=80,
+            height=32,
+            corner_radius=6,
+            font=ctk.CTkFont(size=12),
+            fg_color=self.colors["error"],
+            hover_color="#dc2626",
+            command=self._on_deny
+        ).pack(side="right", padx=4)
+        
+        # Approve button
+        ctk.CTkButton(
+            buttons,
+            text=self.options[0] if self.options else "Approve",
+            width=80,
+            height=32,
+            corner_radius=6,
+            font=ctk.CTkFont(size=12),
+            fg_color=self.colors["success"],
+            hover_color="#16a34a",
+            command=self._on_approve
+        ).pack(side="right", padx=4)
+    
+    def _on_approve(self):
+        """Handle approval."""
+        self.result = True
+        remember = self.remember_var.get()
+        self._hide()
+        if self.on_approve:
+            self.on_approve(remember)
+    
+    def _on_deny(self):
+        """Handle denial."""
+        self.result = False
+        remember = self.remember_var.get()
+        self._hide()
+        if self.on_deny:
+            self.on_deny(remember)
+    
+    def _hide(self):
+        """Hide dialog."""
+        if self.frame:
+            try:
+                self.frame.destroy()
+            except Exception:
+                pass
+        self.frame = None
+
+
 class ToolIndicator:
     """Smooth tool execution indicator."""
     
@@ -1550,6 +1679,52 @@ class ChatInterface:
             self.tool_indicator = None
         
         self._scroll_to_bottom()
+    
+    def show_approval_dialog(self, title: str, description: str,
+                            on_approve: Callable[[bool], None],
+                            on_deny: Callable[[bool], None],
+                            options: List[str] = None) -> ApprovalDialog:
+        """Show an approval dialog for human-in-the-loop."""
+        if not CTK_AVAILABLE:
+            return None
+        
+        try:
+            if not self.messages_frame.winfo_exists():
+                return None
+        except Exception:
+            return None
+        
+        self._hide_typing()
+        
+        dialog = ApprovalDialog(
+            self.messages_frame,
+            self.colors,
+            title,
+            description,
+            on_approve,
+            on_deny,
+            options
+        )
+        
+        self._scroll_to_bottom()
+        return dialog
+    
+    def show_permission_request(self, permission: str, reason: str,
+                               on_response: Callable[[bool, bool], None]):
+        """Show a permission request dialog."""
+        def on_approve(remember):
+            on_response(True, remember)
+        
+        def on_deny(remember):
+            on_response(False, remember)
+        
+        return self.show_approval_dialog(
+            f"Permission: {permission}",
+            reason,
+            on_approve,
+            on_deny,
+            ["Grant", "Deny"]
+        )
     
     def add_message(self, content: str, is_user: bool = False, message_type: str = "text"):
         """Add message (thread-safe)."""

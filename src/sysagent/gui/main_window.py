@@ -1740,7 +1740,7 @@ class MainWindow:
             self._process_simple(message)
     
     def _process_with_streaming(self, message: str, start_time: float):
-        """Process with streaming."""
+        """Process with streaming and human-in-the-loop support."""
         stream_data = None
         try:
             self.root.after(0, lambda: setattr(self, '_stream_data', self.chat_interface.add_streaming_message()))
@@ -1750,6 +1750,7 @@ class MainWindow:
             pass
         
         full_response = ""
+        pending_approval = None
         
         for chunk in self.agent.process_command_streaming(message):
             chunk_type = chunk.get("type", "")
@@ -1770,15 +1771,61 @@ class MainWindow:
             elif chunk_type == "tool_result":
                 duration = int((time.time() - start_time) * 1000)
                 self.root.after(0, lambda d=duration: self.chat_interface.add_execution_log("", "", "success", d))
+            elif chunk_type == "permission_request":
+                # Handle permission request from tool
+                permission = chunk.get("permission", "unknown")
+                tool = chunk.get("tool", "")
+                reason = chunk.get("reason", "Permission required")
+                
+                # Show approval dialog
+                def on_response(approved, remember):
+                    if approved:
+                        # Grant permission and continue
+                        self.permission_manager.grant_permission(permission)
+                        if hasattr(self.agent, 'resume_from_interrupt'):
+                            result = self.agent.resume_from_interrupt(True)
+                            if result.get("success"):
+                                self.root.after(0, lambda r=result["message"]: 
+                                    self.chat_interface.add_message(r, is_user=False))
+                    else:
+                        self.root.after(0, lambda: 
+                            self.chat_interface.add_message(f"Permission denied for {permission}", is_user=False, message_type="error"))
+                
+                self.root.after(0, lambda p=permission, r=reason: 
+                    self.chat_interface.show_permission_request(p, r, on_response))
+                pending_approval = True
+            elif chunk_type == "interrupt":
+                # Handle human-in-the-loop interrupt
+                interrupt_data = chunk.get("data", {})
+                
+                def on_approve(remember):
+                    if hasattr(self.agent, 'resume_from_interrupt'):
+                        result = self.agent.resume_from_interrupt(True)
+                        if result.get("success"):
+                            self.root.after(0, lambda r=result["message"]: 
+                                self.chat_interface.add_message(r, is_user=False))
+                
+                def on_deny(remember):
+                    self.root.after(0, lambda: 
+                        self.chat_interface.add_message("Action cancelled by user", is_user=False))
+                
+                self.root.after(0, lambda: 
+                    self.chat_interface.show_approval_dialog(
+                        "Agent Confirmation",
+                        str(interrupt_data),
+                        on_approve,
+                        on_deny
+                    ))
+                pending_approval = True
             elif chunk_type == "error":
                 full_response = f"Error: {content}"
                 break
             elif chunk_type == "done":
                 break
         
-        if stream_data:
+        if stream_data and not pending_approval:
             self.root.after(0, lambda: self.chat_interface.finish_streaming_message(stream_data))
-        elif full_response:
+        elif full_response and not pending_approval:
             self.root.after(0, lambda r=full_response: self.chat_interface.add_message(r, is_user=False))
     
     def _process_simple(self, message: str):
