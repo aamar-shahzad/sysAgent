@@ -617,7 +617,7 @@ class SettingsWindow:
         webbrowser.open(url)
 
     def _load_api_key(self, entry, key_name: str):
-        """Load an API key from environment or config."""
+        """Load an API key from secure storage or environment."""
         env_map = {
             "openai_api_key": "OPENAI_API_KEY",
             "anthropic_api_key": "ANTHROPIC_API_KEY",
@@ -627,7 +627,15 @@ class SettingsWindow:
         
         env_var = env_map.get(key_name)
         if env_var:
-            value = os.environ.get(env_var, "")
+            # Try to get from config manager's secure storage
+            value = None
+            if self.config_manager:
+                value = self.config_manager.get_api_key(env_var)
+            
+            # Fallback to environment
+            if not value:
+                value = os.environ.get(env_var, "")
+            
             if value:
                 entry.insert(0, value)
 
@@ -666,44 +674,30 @@ class SettingsWindow:
         return False
 
     def _save_api_keys(self):
-        """Save API keys to environment file."""
+        """Save API keys to secure storage."""
         try:
             if self.config_manager:
-                env_file = self.config_manager.config_dir / ".env"
-                env_file.parent.mkdir(parents=True, exist_ok=True)
+                saved_count = 0
                 
-                keys = {}
+                key_entries = [
+                    ("openai_api_key_entry", "OPENAI_API_KEY"),
+                    ("anthropic_api_key_entry", "ANTHROPIC_API_KEY"),
+                    ("google_api_key_entry", "GOOGLE_API_KEY"),
+                    ("aws_access_key_entry", "AWS_ACCESS_KEY_ID"),
+                ]
                 
-                if hasattr(self, 'openai_api_key_entry'):
-                    key = self.openai_api_key_entry.get()
-                    if key:
-                        keys["OPENAI_API_KEY"] = key
-                        os.environ["OPENAI_API_KEY"] = key
+                for entry_name, env_name in key_entries:
+                    if hasattr(self, entry_name):
+                        entry = getattr(self, entry_name)
+                        key_value = entry.get().strip()
+                        if key_value:
+                            if self.config_manager.save_api_key(env_name, key_value):
+                                saved_count += 1
                 
-                if hasattr(self, 'anthropic_api_key_entry'):
-                    key = self.anthropic_api_key_entry.get()
-                    if key:
-                        keys["ANTHROPIC_API_KEY"] = key
-                        os.environ["ANTHROPIC_API_KEY"] = key
-                
-                if hasattr(self, 'google_api_key_entry'):
-                    key = self.google_api_key_entry.get()
-                    if key:
-                        keys["GOOGLE_API_KEY"] = key
-                        os.environ["GOOGLE_API_KEY"] = key
-                
-                if hasattr(self, 'aws_access_key_entry'):
-                    key = self.aws_access_key_entry.get()
-                    if key:
-                        keys["AWS_ACCESS_KEY_ID"] = key
-                        os.environ["AWS_ACCESS_KEY_ID"] = key
-                
-                # Write to .env file
-                with open(env_file, 'w') as f:
-                    for key, value in keys.items():
-                        f.write(f"{key}={value}\n")
-                
-                messagebox.showinfo("Success", "API keys saved successfully!")
+                if saved_count > 0:
+                    messagebox.showinfo("Success", f"Saved {saved_count} API key(s) securely!\n\nKeys are stored in:\n• System keyring (if available)\n• {self.config_manager.env_file}")
+                else:
+                    messagebox.showinfo("Info", "No API keys to save. Enter your keys first.")
             else:
                 messagebox.showerror("Error", "Could not save API keys - config manager not initialized")
         except Exception as e:

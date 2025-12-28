@@ -131,9 +131,14 @@ class MainWindow:
 
     def _new_chat(self):
         """Start a new chat session."""
-        if self.chat_interface:
-            self.chat_interface.clear_chat()
+        # Always show chat view (which will recreate the interface)
         self._show_chat()
+        # Clear any existing messages if the interface was recreated
+        if self.chat_interface:
+            try:
+                self.chat_interface.clear_chat()
+            except Exception:
+                pass  # Interface may have been recreated
 
     def _create_content(self):
         """Create the main content area."""
