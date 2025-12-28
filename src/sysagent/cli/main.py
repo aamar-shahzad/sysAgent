@@ -1605,5 +1605,362 @@ def handle_permission_revoke(permission_manager, tool):
         console.print(f"[red]✗[/red] Error revoking permissions: {e}")
 
 
+# ==================== SMART LEARNING COMMANDS ====================
+
+@cli.group()
+def learn():
+    """Smart learning and personalization commands."""
+    pass
+
+
+@learn.command("stats")
+def learn_stats():
+    """Show learning statistics."""
+    try:
+        from ..core.smart_learning import get_learning_system
+        learning = get_learning_system()
+        stats = learning.get_stats()
+        
+        console.print("\n[bold]📊 Learning Statistics[/bold]\n")
+        console.print(f"  Total commands recorded: {stats['total_commands']}")
+        console.print(f"  Unique commands: {stats['unique_commands']}")
+        console.print(f"  Commands today: {stats['commands_today']}")
+        console.print(f"  Shortcuts: {stats['shortcuts_count']}")
+        console.print(f"  Snippets: {stats['snippets_count']}")
+        console.print(f"  Patterns detected: {stats['patterns_detected']}")
+        console.print(f"  Favorites: {stats['favorites_count']}")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@learn.command("suggestions")
+def learn_suggestions():
+    """Show smart command suggestions."""
+    try:
+        from ..core.smart_learning import get_learning_system
+        learning = get_learning_system()
+        
+        console.print("\n[bold]⚡ Smart Suggestions[/bold]\n")
+        
+        # Time-based
+        time_sugg = learning.get_time_based_suggestions()
+        if time_sugg:
+            console.print("[dim]Based on your patterns:[/dim]")
+            for s in time_sugg:
+                console.print(f"  • {s['command']} ({s['reason']})")
+        
+        # Most used
+        console.print("\n[dim]Most used commands:[/dim]")
+        most_used = learning.get_most_used_commands(5)
+        for cmd, count in most_used:
+            console.print(f"  • {cmd} ({count} times)")
+        
+        # Recent
+        console.print("\n[dim]Recent commands:[/dim]")
+        recent = learning.get_recent_commands(5)
+        for cmd in recent:
+            console.print(f"  • {cmd}")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@learn.command("history")
+@click.option("--search", "-s", default="", help="Search query")
+@click.option("--limit", "-n", default=20, help="Number of results")
+def learn_history(search, limit):
+    """Search command history."""
+    try:
+        from ..core.smart_learning import get_learning_system
+        learning = get_learning_system()
+        
+        results = learning.search_history(search, limit)
+        
+        console.print(f"\n[bold]📜 Command History[/bold] ({len(results)} results)\n")
+        for entry in results:
+            cmd = entry.get('command', '')
+            ts = entry.get('timestamp', '')[:10]
+            console.print(f"  [{ts}] {cmd}")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+# ==================== SNIPPETS COMMANDS ====================
+
+@cli.group()
+def snippets():
+    """Manage command snippets."""
+    pass
+
+
+@snippets.command("list")
+@click.option("--search", "-s", default="", help="Search query")
+def snippets_list(search):
+    """List saved snippets."""
+    try:
+        from ..core.smart_learning import get_learning_system
+        learning = get_learning_system()
+        
+        results = learning.search_snippets(search)
+        
+        console.print(f"\n[bold]📌 Saved Snippets[/bold] ({len(results)} total)\n")
+        for snip in results:
+            fav = "⭐ " if snip.get('is_favorite') else ""
+            console.print(f"  {fav}[bold]{snip['name']}[/bold]")
+            console.print(f"    {snip['command'][:60]}...")
+            if snip.get('tags'):
+                console.print(f"    Tags: {', '.join(snip['tags'])}")
+            console.print()
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@snippets.command("save")
+@click.argument("name")
+@click.argument("command")
+@click.option("--description", "-d", default="", help="Description")
+@click.option("--tags", "-t", default="", help="Tags (comma-separated)")
+def snippets_save(name, command, description, tags):
+    """Save a new snippet."""
+    try:
+        from ..core.smart_learning import get_learning_system
+        learning = get_learning_system()
+        
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+        snippet_id = learning.save_snippet(name, command, description, tag_list)
+        
+        console.print(f"[green]✓[/green] Snippet saved: {name} (ID: {snippet_id})")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@snippets.command("delete")
+@click.argument("snippet_id")
+def snippets_delete(snippet_id):
+    """Delete a snippet."""
+    try:
+        from ..core.smart_learning import get_learning_system
+        learning = get_learning_system()
+        
+        if learning.delete_snippet(snippet_id):
+            console.print(f"[green]✓[/green] Snippet deleted")
+        else:
+            console.print(f"[red]Snippet not found[/red]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@snippets.command("favorite")
+@click.argument("snippet_id")
+def snippets_favorite(snippet_id):
+    """Toggle favorite status of a snippet."""
+    try:
+        from ..core.smart_learning import get_learning_system
+        learning = get_learning_system()
+        
+        is_fav = learning.toggle_favorite(snippet_id)
+        status = "added to" if is_fav else "removed from"
+        console.print(f"[green]✓[/green] Snippet {status} favorites")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+# ==================== SHORTCUTS COMMANDS ====================
+
+@cli.group()
+def shortcuts():
+    """Manage command shortcuts."""
+    pass
+
+
+@shortcuts.command("list")
+def shortcuts_list():
+    """List all shortcuts."""
+    try:
+        from ..core.smart_learning import get_learning_system
+        learning = get_learning_system()
+        
+        shortcuts_data = learning.list_shortcuts()
+        
+        console.print(f"\n[bold]⚡ Command Shortcuts[/bold] ({len(shortcuts_data)} total)\n")
+        for s in shortcuts_data:
+            console.print(f"  [bold]{s['name']}[/bold] → {s['command']}")
+            if s.get('description'):
+                console.print(f"    {s['description']}")
+            console.print(f"    Used {s['usage_count']} times")
+            console.print()
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@shortcuts.command("add")
+@click.argument("name")
+@click.argument("command")
+@click.option("--description", "-d", default="", help="Description")
+def shortcuts_add(name, command, description):
+    """Add a new shortcut."""
+    try:
+        from ..core.smart_learning import get_learning_system
+        learning = get_learning_system()
+        
+        if learning.add_shortcut(name, command, description):
+            console.print(f"[green]✓[/green] Shortcut '{name}' added")
+        else:
+            console.print(f"[red]Failed to add shortcut[/red]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@shortcuts.command("remove")
+@click.argument("name")
+def shortcuts_remove(name):
+    """Remove a shortcut."""
+    try:
+        from ..core.smart_learning import get_learning_system
+        learning = get_learning_system()
+        
+        if learning.remove_shortcut(name):
+            console.print(f"[green]✓[/green] Shortcut '{name}' removed")
+        else:
+            console.print(f"[red]Shortcut not found[/red]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@shortcuts.command("run")
+@click.argument("name")
+def shortcuts_run(name):
+    """Run a shortcut command."""
+    try:
+        from ..core.smart_learning import get_learning_system
+        learning = get_learning_system()
+        
+        command = learning.get_shortcut(name)
+        if command:
+            console.print(f"[dim]Running: {command}[/dim]")
+            # Execute the command through the agent
+            config_manager = ConfigManager()
+            permission_manager = PermissionManager(config_manager)
+            from ..core.langgraph_agent import LangGraphAgent
+            agent = LangGraphAgent(config_manager, permission_manager)
+            result = agent.process_command(command)
+            if result.get('success'):
+                console.print(result.get('message', 'Done'))
+            else:
+                console.print(f"[red]{result.get('message', 'Error')}[/red]")
+        else:
+            console.print(f"[red]Shortcut '{name}' not found[/red]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+# ==================== MONITORING COMMANDS ====================
+
+@cli.group()
+def monitor():
+    """Proactive monitoring commands."""
+    pass
+
+
+@monitor.command("status")
+def monitor_status():
+    """Show current system health status."""
+    try:
+        from ..core.proactive_monitor import get_monitor
+        mon = get_monitor()
+        
+        health = mon.run_health_check()
+        
+        status_color = {
+            'healthy': 'green',
+            'warning': 'yellow',
+            'critical': 'red',
+            'error': 'red'
+        }.get(health['status'], 'white')
+        
+        console.print(f"\n[bold]🏥 System Health: [{status_color}]{health['status'].upper()}[/{status_color}][/bold]\n")
+        
+        metrics = health.get('metrics', {})
+        if metrics:
+            console.print("[dim]Metrics:[/dim]")
+            console.print(f"  CPU: {metrics.get('cpu_percent', 'N/A')}%")
+            console.print(f"  Memory: {metrics.get('memory_percent', 'N/A')}%")
+            console.print(f"  Disk: {metrics.get('disk_percent', 'N/A')}%")
+            if 'battery_percent' in metrics:
+                console.print(f"  Battery: {metrics['battery_percent']}%")
+        
+        issues = health.get('issues', [])
+        if issues:
+            console.print("\n[yellow]Issues:[/yellow]")
+            for issue in issues:
+                console.print(f"  ⚠️ {issue}")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@monitor.command("alerts")
+def monitor_alerts():
+    """Show active alerts."""
+    try:
+        from ..core.proactive_monitor import get_monitor
+        mon = get_monitor()
+        
+        alerts = mon.get_active_alerts()
+        
+        console.print(f"\n[bold]🔔 Active Alerts[/bold] ({len(alerts)} total)\n")
+        
+        if not alerts:
+            console.print("[green]✓ No active alerts[/green]")
+            return
+        
+        for alert in alerts:
+            level_color = {
+                'critical': 'red',
+                'warning': 'yellow',
+                'info': 'blue'
+            }.get(alert.level, 'white')
+            
+            console.print(f"[{level_color}]● {alert.title}[/{level_color}]")
+            console.print(f"  {alert.message}")
+            if alert.suggestion:
+                console.print(f"  [dim]Suggestion: {alert.suggestion}[/dim]")
+            console.print()
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@monitor.command("dismiss")
+@click.argument("alert_id", required=False)
+@click.option("--all", "dismiss_all", is_flag=True, help="Dismiss all alerts")
+def monitor_dismiss(alert_id, dismiss_all):
+    """Dismiss an alert or all alerts."""
+    try:
+        from ..core.proactive_monitor import get_monitor
+        mon = get_monitor()
+        
+        if dismiss_all:
+            count = mon.dismiss_all()
+            console.print(f"[green]✓[/green] Dismissed {count} alerts")
+        elif alert_id:
+            if mon.dismiss_alert(alert_id):
+                console.print(f"[green]✓[/green] Alert dismissed")
+            else:
+                console.print(f"[red]Alert not found[/red]")
+        else:
+            console.print("[red]Specify an alert ID or use --all[/red]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@monitor.command("start")
+def monitor_start():
+    """Start background monitoring."""
+    try:
+        from ..core.proactive_monitor import start_monitoring
+        start_monitoring()
+        console.print("[green]✓[/green] Background monitoring started")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
 if __name__ == "__main__":
     main() 

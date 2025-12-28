@@ -87,6 +87,50 @@
 - Learn usage patterns for smarter suggestions
 - Time-based contextual recommendations
 
+### 🧠 Smart Learning System (NEW!)
+
+**Intelligent Command Learning:**
+- Automatic command usage tracking
+- Time-based pattern detection (knows what you do at certain times)
+- Command sequence learning (suggests next commands)
+- Smart suggestions based on your habits
+- Success rate tracking for better recommendations
+
+**Snippets & Shortcuts:**
+- Save frequently used commands as snippets
+- Create custom shortcuts for quick access
+- Tag and organize snippets
+- Mark favorites for quick access
+- Search through saved commands
+
+**Command History:**
+- Full searchable command history
+- Usage statistics and analytics
+- Pattern detection and insights
+- Export history data
+
+### 🔔 Proactive Monitoring (NEW!)
+
+**Background System Monitoring:**
+- Real-time CPU/Memory/Disk monitoring
+- Configurable alert thresholds
+- Battery monitoring (laptops)
+- Network connectivity checks
+- Automatic issue detection
+
+**Smart Alerts:**
+- Critical, Warning, and Info levels
+- Actionable suggestions with each alert
+- One-click fix options
+- Alert history and dismissal
+- Cooldown to prevent spam
+
+**Maintenance Suggestions:**
+- Automatic temp file detection
+- Cleanup recommendations
+- Performance optimization tips
+- Security issue detection
+
 ### 🏢 Enterprise Features (NEW!)
 
 **Session Management:**
@@ -441,6 +485,74 @@ Available Modes:
 - `security` - Security auditing
 - `productivity` - Apps and workflows
 - `automation` - Workflow automation
+
+### Smart Learning Commands
+
+```bash
+# View learning statistics
+sysagent learn stats
+
+# Get smart suggestions based on your habits
+sysagent learn suggestions
+
+# Search command history
+sysagent learn history --search "git"
+sysagent learn history --limit 50
+```
+
+### Snippets Management
+
+```bash
+# List all snippets
+sysagent snippets list
+
+# Search snippets
+sysagent snippets list --search "backup"
+
+# Save a new snippet
+sysagent snippets save "backup-db" "pg_dump mydb > backup.sql" --description "Backup database" --tags "database,backup"
+
+# Delete a snippet
+sysagent snippets delete snip_123456
+
+# Toggle favorite
+sysagent snippets favorite snip_123456
+```
+
+### Shortcuts Management
+
+```bash
+# List all shortcuts
+sysagent shortcuts list
+
+# Add a new shortcut
+sysagent shortcuts add "ss" "show system status" --description "Quick status check"
+
+# Remove a shortcut
+sysagent shortcuts remove "ss"
+
+# Run a shortcut
+sysagent shortcuts run "ss"
+```
+
+### Proactive Monitoring
+
+```bash
+# Check current system health
+sysagent monitor status
+
+# View active alerts
+sysagent monitor alerts
+
+# Dismiss an alert
+sysagent monitor dismiss alert_123456
+
+# Dismiss all alerts
+sysagent monitor dismiss --all
+
+# Start background monitoring
+sysagent monitor start
+```
 
 ### Plugin Management
 
