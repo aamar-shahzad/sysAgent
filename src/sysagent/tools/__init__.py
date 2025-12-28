@@ -19,6 +19,8 @@ from .clipboard_tool import ClipboardTool
 from .screenshot_tool import ScreenshotTool
 from .voice_tool import VoiceTool
 from .auth_tool import AuthTool
+from .scheduler_tool import SchedulerTool
+from .service_tool import ServiceTool
 
 __all__ = [
     "BaseTool",
@@ -42,4 +44,6 @@ __all__ = [
     "ScreenshotTool",
     "VoiceTool",
     "AuthTool",
+    "SchedulerTool",
+    "ServiceTool",
 ] 

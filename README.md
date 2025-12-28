@@ -14,20 +14,22 @@
 - Support for OpenAI, Ollama, and local models
 - Context-aware responses and suggestions
 
-### 🛠️ Comprehensive System Tools
+### 🛠️ Comprehensive System Tools (18 Tools)
 - **FileTool**: File operations, cleanup, organization
 - **SystemInfoTool**: Real-time system metrics and monitoring
 - **ProcessTool**: Process management and control
 - **NetworkTool**: Network diagnostics and connectivity
 - **AppTool**: Application launching and management
-- **AutomationTool**: Task scheduling and automation
-- **SystemControlTool**: System service management
+- **SchedulerTool**: Task scheduling and cron job management
+- **ServiceTool**: System service control (start/stop/restart)
+- **SystemControlTool**: System power and control operations
 - **ClipboardTool**: Clipboard operations
 - **AuthTool**: Secure credential management
 - **ScreenshotTool**: Screen capture and analysis
 - **VoiceTool**: Voice input/output capabilities
 - **SecurityTool**: Security scanning and management
 - **MonitoringTool**: System monitoring and alerts
+- **AutomationTool**: Workflow automation
 - **CodeGenerationTool**: Code generation and execution
 - **OSIntelligenceTool**: OS-specific optimizations
 - **LowLevelOSTool**: Low-level OS operations
