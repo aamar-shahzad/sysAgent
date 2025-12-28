@@ -23,6 +23,15 @@ from .scheduler_tool import SchedulerTool
 from .service_tool import ServiceTool
 from .document_tool import DocumentTool
 from .spreadsheet_tool import SpreadsheetTool
+from .browser_tool import BrowserTool
+from .window_tool import WindowTool
+from .keyboard_mouse_tool import KeyboardMouseTool
+from .media_tool import MediaTool
+from .notification_tool import NotificationTool
+from .package_manager_tool import PackageManagerTool
+from .git_tool import GitTool
+from .api_tool import APITool
+from .email_tool import EmailTool
 
 __all__ = [
     "BaseTool",
@@ -50,4 +59,13 @@ __all__ = [
     "ServiceTool",
     "DocumentTool",
     "SpreadsheetTool",
+    "BrowserTool",
+    "WindowTool",
+    "KeyboardMouseTool",
+    "MediaTool",
+    "NotificationTool",
+    "PackageManagerTool",
+    "GitTool",
+    "APITool",
+    "EmailTool",
 ] 
