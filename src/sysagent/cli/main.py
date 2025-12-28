@@ -873,6 +873,205 @@ def dashboard(ctx):
         console.print(f"[red]Error opening dashboard:[/red] {e}")
 
 
+# Plugin management commands
+@cli.group()
+@click.pass_context
+def plugins(ctx):
+    """Manage SysAgent plugins."""
+    pass
+
+
+@plugins.command(name="list")
+@click.option('--all', 'show_all', is_flag=True, help='Show all discovered plugins (not just loaded)')
+@click.pass_context
+def list_plugins(ctx, show_all):
+    """List installed plugins."""
+    from ..core.plugins import PluginManager
+    
+    plugin_manager = PluginManager()
+    
+    if show_all:
+        discovered = plugin_manager.discover_plugins()
+        console.print("[bold]Discovered Plugins:[/bold]")
+        if discovered:
+            for plugin in discovered:
+                status = "[green]loaded[/green]" if plugin.get('loaded') else "[dim]not loaded[/dim]"
+                console.print(f"  • {plugin.get('name', 'Unknown')} - {status}")
+                if plugin.get('description'):
+                    console.print(f"    {plugin['description']}")
+                if plugin.get('error'):
+                    console.print(f"    [red]Error: {plugin['error']}[/red]")
+        else:
+            console.print("  [dim]No plugins found[/dim]")
+    else:
+        loaded = plugin_manager.list_plugins()
+        console.print("[bold]Loaded Plugins:[/bold]")
+        if loaded:
+            for plugin in loaded:
+                enabled = "[green]enabled[/green]" if plugin.enabled else "[yellow]disabled[/yellow]"
+                console.print(f"  • {plugin.name} v{plugin.version} - {enabled}")
+                console.print(f"    {plugin.description}")
+                console.print(f"    Tools: {', '.join(plugin.tools) if plugin.tools else 'none'}")
+        else:
+            console.print("  [dim]No plugins loaded[/dim]")
+
+
+@plugins.command()
+@click.argument('name')
+@click.pass_context
+def load(ctx, name):
+    """Load a plugin."""
+    from ..core.plugins import PluginManager
+    
+    plugin_manager = PluginManager()
+    
+    console.print(f"[blue]Loading plugin: {name}...[/blue]")
+    result = plugin_manager.load_plugin(name)
+    
+    if result:
+        console.print(f"[green]✓[/green] Plugin '{result.name}' loaded successfully")
+        console.print(f"  Version: {result.version}")
+        console.print(f"  Tools: {', '.join(result.tools) if result.tools else 'none'}")
+    else:
+        console.print(f"[red]✗[/red] Failed to load plugin '{name}'")
+
+
+@plugins.command()
+@click.argument('name')
+@click.pass_context
+def unload(ctx, name):
+    """Unload a plugin."""
+    from ..core.plugins import PluginManager
+    
+    plugin_manager = PluginManager()
+    
+    if plugin_manager.unload_plugin(name):
+        console.print(f"[green]✓[/green] Plugin '{name}' unloaded")
+    else:
+        console.print(f"[red]✗[/red] Plugin '{name}' not found or not loaded")
+
+
+@plugins.command()
+@click.argument('name')
+@click.option('--output', '-o', help='Output directory for plugin')
+@click.pass_context
+def create(ctx, name, output):
+    """Create a new plugin template."""
+    from ..core.plugins import create_plugin_template
+    
+    console.print(f"[blue]Creating plugin template: {name}...[/blue]")
+    
+    try:
+        plugin_path = create_plugin_template(name, output)
+        console.print(f"[green]✓[/green] Plugin template created at: {plugin_path}")
+        console.print("\n[bold]Next steps:[/bold]")
+        console.print(f"  1. Edit {plugin_path}/example_tool.py")
+        console.print(f"  2. Update {plugin_path}/plugin.json with metadata")
+        console.print(f"  3. Load with: sysagent plugins load {name}")
+    except Exception as e:
+        console.print(f"[red]✗[/red] Failed to create plugin: {e}")
+
+
+# Audit log commands
+@cli.group()
+@click.pass_context
+def logs(ctx):
+    """View and manage audit logs."""
+    pass
+
+
+@logs.command(name="show")
+@click.option('--limit', '-n', default=20, help='Number of events to show')
+@click.option('--type', 'event_type', help='Filter by event type')
+@click.option('--since', help='Show events since date (YYYY-MM-DD)')
+@click.option('--until', help='Show events until date (YYYY-MM-DD)')
+@click.pass_context
+def show_logs(ctx, limit, event_type, since, until):
+    """Show recent audit events."""
+    from ..core.logging import get_audit_logger
+    
+    logger = get_audit_logger()
+    
+    event_types = [event_type] if event_type else None
+    events = logger.get_events(
+        start_date=since,
+        end_date=until,
+        event_types=event_types,
+        limit=limit
+    )
+    
+    console.print(f"[bold]Audit Log ({len(events)} events):[/bold]\n")
+    
+    for event in events:
+        # Format timestamp
+        time_str = event.timestamp.split('T')[1].split('.')[0] if 'T' in event.timestamp else event.timestamp
+        
+        # Color based on success
+        status = "[green]✓[/green]" if event.success else "[red]✗[/red]"
+        
+        console.print(f"{status} [{time_str}] {event.event_type}: {event.action}")
+        if event.error:
+            console.print(f"    [red]Error: {event.error}[/red]")
+
+
+@logs.command()
+@click.option('--format', 'fmt', type=click.Choice(['json', 'csv']), default='json', help='Export format')
+@click.option('--output', '-o', required=True, help='Output file path')
+@click.option('--limit', '-n', default=1000, help='Maximum events to export')
+@click.pass_context
+def export(ctx, fmt, output, limit):
+    """Export audit logs to a file."""
+    from ..core.logging import get_audit_logger
+    
+    logger = get_audit_logger()
+    
+    try:
+        path = logger.export_events(output, format=fmt, limit=limit)
+        console.print(f"[green]✓[/green] Exported audit logs to: {path}")
+    except Exception as e:
+        console.print(f"[red]✗[/red] Failed to export logs: {e}")
+
+
+@logs.command()
+@click.option('--days', default=30, help='Keep logs from last N days')
+@click.option('--confirm', is_flag=True, help='Skip confirmation prompt')
+@click.pass_context
+def cleanup(ctx, days, confirm):
+    """Clean up old audit logs."""
+    from ..core.logging import get_audit_logger
+    
+    if not confirm:
+        if not click.confirm(f"Delete audit logs older than {days} days?"):
+            console.print("[dim]Cleanup cancelled[/dim]")
+            return
+    
+    logger = get_audit_logger()
+    logger.clear_old_logs(days)
+    console.print(f"[green]✓[/green] Cleaned up logs older than {days} days")
+
+
+@logs.command()
+@click.pass_context
+def session(ctx):
+    """Show events from the current session."""
+    from ..core.logging import get_audit_logger
+    
+    logger = get_audit_logger()
+    
+    console.print(f"[bold]Session ID: {logger.session_id}[/bold]\n")
+    
+    events = logger.get_session_events()
+    
+    if events:
+        for event in events:
+            if event.session_id == logger.session_id:
+                time_str = event.timestamp.split('T')[1].split('.')[0] if 'T' in event.timestamp else event.timestamp
+                status = "[green]✓[/green]" if event.success else "[red]✗[/red]"
+                console.print(f"{status} [{time_str}] {event.event_type}: {event.action}")
+    else:
+        console.print("[dim]No events in current session[/dim]")
+
+
 # Add langgraph command group to main CLI
 cli.add_command(langgraph)
 

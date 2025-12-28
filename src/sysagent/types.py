@@ -39,11 +39,14 @@ class ToolCategory(Enum):
     AUTH = "auth"
     SCREENSHOT = "screenshot"
     VOICE = "voice"
+    VISION = "vision"
     CUSTOM = "custom"
     SECURITY = "security"
     AUTOMATION = "automation"
     MONITORING = "monitoring"
     CODE_GENERATION = "code_generation"
+    OS_INTELLIGENCE = "os_intelligence"
+    LOW_LEVEL = "low_level"
 
 
 class LLMProvider(Enum):
