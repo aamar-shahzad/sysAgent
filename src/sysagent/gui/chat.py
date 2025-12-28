@@ -356,6 +356,13 @@ class ChatInterface:
     
     def _add_message_bubble(self, content: str, is_user: bool):
         """Add a message bubble to the chat."""
+        # Check if messages_frame still exists
+        try:
+            if not self.messages_frame or not self.messages_frame.winfo_exists():
+                return
+        except Exception:
+            return
+        
         timestamp = datetime.now().strftime("%H:%M")
         
         if USE_CUSTOMTKINTER:
@@ -444,11 +451,15 @@ class ChatInterface:
     
     def _scroll_to_bottom(self):
         """Scroll messages to bottom."""
-        if USE_CUSTOMTKINTER:
-            self.messages_frame._parent_canvas.yview_moveto(1.0)
-        else:
-            if hasattr(self, '_canvas'):
-                self._canvas.yview_moveto(1.0)
+        try:
+            if USE_CUSTOMTKINTER:
+                if hasattr(self.messages_frame, '_parent_canvas') and self.messages_frame._parent_canvas.winfo_exists():
+                    self.messages_frame._parent_canvas.yview_moveto(1.0)
+            else:
+                if hasattr(self, '_canvas') and self._canvas.winfo_exists():
+                    self._canvas.yview_moveto(1.0)
+        except Exception:
+            pass  # Widget may have been destroyed
     
     def add_message(self, content: str, is_user: bool = False):
         """Add a message to the chat (thread-safe)."""
@@ -473,10 +484,16 @@ class ChatInterface:
     
     def clear_chat(self):
         """Clear all messages from chat."""
-        for widget in self.messages_frame.winfo_children():
-            widget.destroy()
-        
-        self._add_system_message("Chat cleared. How can I help you?")
+        try:
+            # Check if the frame still exists
+            if self.messages_frame and self.messages_frame.winfo_exists():
+                for widget in self.messages_frame.winfo_children():
+                    widget.destroy()
+                
+                self._add_system_message("Chat cleared. How can I help you?")
+        except Exception:
+            # Frame was destroyed, nothing to clear
+            pass
     
     def get_frame(self):
         """Get the main frame widget."""

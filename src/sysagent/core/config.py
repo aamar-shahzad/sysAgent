@@ -454,10 +454,4 @@ class ConfigManager:
             "verbose": config.verbose,
             "debug": config.debug,
             "api_keys_configured": {k: v for k, v in api_keys.items() if v},
-        }
-
-
-# Legacy compatibility - remove reset_config duplicate
-ConfigManager.reset_config_old = None  # Placeholder to avoid issues
-            self.config_file.unlink()
-        self.load_config() 
+        } 
