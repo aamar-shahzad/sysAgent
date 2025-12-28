@@ -87,6 +87,48 @@
 - Learn usage patterns for smarter suggestions
 - Time-based contextual recommendations
 
+### 🏢 Enterprise Features (NEW!)
+
+**Session Management:**
+- Save and resume chat conversations
+- Export sessions (JSON, Markdown, Text)
+- Search through conversation history
+- Session statistics and analytics
+
+**REST API Server:**
+- Full HTTP API for external integrations
+- API key authentication with rate limiting
+- Endpoints for chat, tools, sessions
+- CORS support for web applications
+
+**Agent Modes:**
+- **General**: All-purpose assistant
+- **Developer**: Git, code, packages, development focus
+- **SysAdmin**: System administration and monitoring
+- **Security**: Security auditing and scanning
+- **Productivity**: Apps, workflows, notifications
+- **Automation**: Workflow creation and scheduling
+
+**Activity Dashboard:**
+- Real-time activity timeline
+- Tool usage statistics
+- Error logging and tracking
+- Session analytics
+- Visual audit trail
+
+**Onboarding Wizard:**
+- First-time user setup experience
+- API key configuration
+- Permission selection
+- Mode selection
+- Quick tips tour
+
+**System Tray Mode:**
+- Run in background with tray icon
+- Global hotkeys (Ctrl+Shift+S / Cmd+Shift+S)
+- Quick actions from tray menu
+- System notifications
+
 ### 🖥️ Next-Level GUI Features
 - **Chat Interface**: Natural language interaction with markdown rendering & streaming
 - **Command Palette**: Quick command search with ⌘K / Ctrl+K (fuzzy search all commands)
@@ -320,7 +362,85 @@ sysagent settings
 
 # Open the system dashboard
 sysagent dashboard
+
+# Open activity dashboard (audit trail)
+sysagent activity
+
+# Run in system tray mode (background)
+sysagent tray
 ```
+
+### REST API Server
+
+```bash
+# Start API server on default port 8080
+sysagent api
+
+# Custom port and host
+sysagent api --port 3000 --host 0.0.0.0
+
+# Disable authentication (development only)
+sysagent api --no-auth
+```
+
+API Endpoints:
+- `GET /api/health` - Health check
+- `GET /api/info` - API information
+- `POST /api/chat` - Send a message
+- `GET /api/tools` - List available tools
+- `POST /api/tool/{name}` - Execute a tool
+- `GET /api/sessions` - List sessions
+- `GET /api/session/{id}` - Get session details
+- `POST /api/keys` - Create API key (admin only)
+
+### Session Management
+
+```bash
+# List all chat sessions
+sysagent sessions list
+
+# Search sessions
+sysagent sessions list --search "python"
+
+# Show a specific session
+sysagent sessions show abc123
+
+# Export session to file
+sysagent sessions export abc123 --format markdown -o session.md
+
+# Delete a session
+sysagent sessions delete abc123
+
+# View session statistics
+sysagent sessions stats
+```
+
+### Agent Modes
+
+```bash
+# List available modes
+sysagent mode list
+
+# Switch to developer mode
+sysagent mode set developer
+
+# Switch to sysadmin mode
+sysagent mode set sysadmin
+
+# Switch to security mode
+sysagent mode set security
+
+# Show current mode
+sysagent mode current
+```
+
+Available Modes:
+- `general` - All-purpose assistant
+- `developer` - Git, code, packages
+- `sysadmin` - System administration
+- `security` - Security auditing
+- `productivity` - Apps and workflows
+- `automation` - Workflow automation
 
 ### Plugin Management
 

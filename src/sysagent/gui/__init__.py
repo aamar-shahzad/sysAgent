@@ -14,6 +14,11 @@ __all__ = [
     "launch_settings",
     "launch_dashboard",
     "launch_chat",
+    "launch_activity_dashboard",
+    "OnboardingWizard",
+    "show_onboarding",
+    "SystemTray",
+    "run_tray_mode",
 ]
 
 
@@ -100,3 +105,35 @@ def launch_chat():
     from .chat import ChatWindow
     app = ChatWindow()
     app.run()
+
+
+def launch_activity_dashboard():
+    """Launch the activity dashboard."""
+    if not _check_gui_available():
+        raise ImportError("tkinter is not available. Install with: apt-get install python3-tk (Linux) or ensure Python was installed with Tcl/Tk support.")
+    from .activity_dashboard import show_activity_dashboard
+    show_activity_dashboard()
+
+
+def OnboardingWizard(on_complete=None):
+    """Get OnboardingWizard class."""
+    from .onboarding import OnboardingWizard as OW
+    return OW(on_complete)
+
+
+def show_onboarding(on_complete=None):
+    """Show onboarding if needed."""
+    from .onboarding import show_onboarding as so
+    return so(on_complete)
+
+
+def SystemTray(on_show=None, on_quit=None, on_quick_action=None):
+    """Get SystemTray class."""
+    from .system_tray import SystemTray as ST
+    return ST(on_show, on_quit, on_quick_action)
+
+
+def run_tray_mode():
+    """Run SysAgent in tray mode."""
+    from .system_tray import run_tray_mode as rtm
+    rtm()

@@ -17,6 +17,9 @@ from .logging import (
     log_permission_request,
     log_error
 )
+from .session_manager import SessionManager, Session, Message
+from .agent_modes import AgentMode, AgentModeManager, ModeConfig, get_mode_manager
+from .activity_tracker import ActivityTracker, Activity, ActivityType, get_activity_tracker
 
 __all__ = [
     "SysAgent",
@@ -35,4 +38,18 @@ __all__ = [
     "log_tool_execution",
     "log_permission_request",
     "log_error",
+    # Session Management
+    "SessionManager",
+    "Session",
+    "Message",
+    # Agent Modes
+    "AgentMode",
+    "AgentModeManager",
+    "ModeConfig",
+    "get_mode_manager",
+    # Activity Tracking
+    "ActivityTracker",
+    "Activity",
+    "ActivityType",
+    "get_activity_tracker",
 ] 
