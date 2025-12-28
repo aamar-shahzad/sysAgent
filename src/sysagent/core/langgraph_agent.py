@@ -1,17 +1,19 @@
 """
 LangGraph-based agent for SysAgent CLI with human-in-the-loop capabilities.
+Includes short-term memory, middleware, and realtime streaming.
 """
 
 import asyncio
 import os
 import time
-from typing import Dict, List, Any, Optional, TypedDict
+import uuid
+from typing import Dict, List, Any, Optional, TypedDict, Generator
 from datetime import datetime
 from pathlib import Path
 
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command, interrupt
@@ -19,6 +21,21 @@ from langgraph.types import Command, interrupt
 from .config import ConfigManager
 from .permissions import PermissionManager
 from ..tools.base import ToolExecutor
+
+# Import memory and middleware
+try:
+    from .memory import MemoryManager, get_memory_manager
+    MEMORY_AVAILABLE = True
+except ImportError:
+    MEMORY_AVAILABLE = False
+    MemoryManager = None
+
+try:
+    from .middleware import HumanInTheLoopMiddleware, get_middleware, ApprovalType
+    MIDDLEWARE_AVAILABLE = True
+except ImportError:
+    MIDDLEWARE_AVAILABLE = False
+    HumanInTheLoopMiddleware = None
 
 
 class AgentState(TypedDict):
@@ -32,18 +49,33 @@ class AgentState(TypedDict):
 
 
 class LangGraphAgent:
-    """LangGraph-based agent with human-in-the-loop capabilities."""
+    """LangGraph-based agent with human-in-the-loop capabilities and memory."""
 
-    def __init__(self, config_manager: ConfigManager, permission_manager: PermissionManager, debug: bool = False):
+    def __init__(self, config_manager: ConfigManager, permission_manager: PermissionManager, 
+                 debug: bool = False, auto_approve: bool = False):
         self.config_manager = config_manager
         self.config = config_manager.get_config()
         self.permission_manager = permission_manager
         self.debug = debug
+        self.auto_approve = auto_approve
         self.tool_executor = ToolExecutor(permission_manager)
         self.session_id = str(int(time.time()))
+        self.thread_id = str(uuid.uuid4())  # Unique thread for checkpointing
         
-        # Initialize memory for conversation history
-        self.memory = MemorySaver()
+        # Initialize checkpointer for state persistence
+        self.checkpointer = MemorySaver()
+        
+        # Initialize short-term memory
+        if MEMORY_AVAILABLE:
+            self.memory_manager = get_memory_manager(self.session_id)
+        else:
+            self.memory_manager = None
+        
+        # Initialize human-in-the-loop middleware
+        if MIDDLEWARE_AVAILABLE:
+            self.middleware = get_middleware(auto_approve=auto_approve)
+        else:
+            self.middleware = None
         
         # Initialize LLM
         self.llm = self._initialize_llm()
@@ -54,7 +86,7 @@ class LangGraphAgent:
         # Register tools with the executor
         self._register_tools_with_executor()
         
-        # Create the React agent
+        # Create the React agent with checkpointer
         self.agent = self._create_react_agent()
 
     def _initialize_llm(self):
@@ -791,8 +823,13 @@ class LangGraphAgent:
             self.tool_executor.register_tool(tool)
 
     def _create_react_agent(self):
-        """Create the React agent using langgraph.prebuilt."""
-        system_prompt = """You are SysAgent, an expert system administrator AI with complete machine control.
+        """Create the React agent using langgraph.prebuilt with checkpointer."""
+        # Get context from long-term memory if available
+        memory_context = ""
+        if self.memory_manager:
+            memory_context = self.memory_manager.get_system_context()
+        
+        system_prompt = f"""You are SysAgent, an expert system administrator AI with complete machine control.
 
 TOOL SELECTION GUIDE - Choose the RIGHT tool for the task:
 
@@ -850,42 +887,80 @@ RULES:
 2. Call ONE tool at a time - be fast and focused
 3. Use specific actions - match user intent precisely
 4. Keep responses concise - focus on results
-5. For ambiguous requests, use the most relevant tool"""
+5. For ambiguous requests, use the most relevant tool
+6. For sensitive operations (delete, modify system), ask for confirmation
+
+{memory_context}"""
 
         return create_react_agent(
             model=self.llm,
             tools=self.tools,
-            prompt=system_prompt
+            prompt=system_prompt,
+            checkpointer=self.checkpointer
         )
 
     def process_command(self, user_input) -> Dict[str, Any]:
-        """Process a command synchronously."""
+        """Process a command synchronously with memory and middleware support."""
         try:
             # Check if this is a Command object for resuming interrupts
             from langgraph.types import Command
             if isinstance(user_input, Command):
-                # Resume from interrupt
-                result = self.agent.invoke(user_input)
+                # Resume from interrupt with thread config
+                config = {"configurable": {"thread_id": self.thread_id}}
+                result = self.agent.invoke(user_input, config=config)
             else:
-                # Regular user input - use minimal history to prevent context overflow
-                # Only include the current message, let the agent handle the context
-                messages = [{"role": "user", "content": user_input}]
+                # Add to short-term memory
+                if self.memory_manager:
+                    self.memory_manager.add_message("user", user_input)
                 
-                # Run the React agent
-                result = self.agent.invoke({"messages": messages})
+                # Get messages from memory for context
+                if self.memory_manager:
+                    messages = self.memory_manager.get_messages_for_llm()
+                    # Ensure the latest message is included
+                    if not messages or messages[-1].get("content") != user_input:
+                        messages.append({"role": "user", "content": user_input})
+                else:
+                    messages = [{"role": "user", "content": user_input}]
+                
+                # Thread config for checkpointing
+                config = {"configurable": {"thread_id": self.thread_id}}
+                
+                # Run the React agent with checkpointer
+                result = self.agent.invoke({"messages": messages}, config=config)
             
-            # Check for interrupts
+            # Check for interrupts (human-in-the-loop)
             if result.get('__interrupt__'):
+                interrupt_data = result['__interrupt__']
+                
+                # Handle via middleware if available
+                if self.middleware and not self.auto_approve:
+                    # Create approval request
+                    for interrupt_item in interrupt_data:
+                        if hasattr(interrupt_item, 'value'):
+                            request = self.middleware.request_approval(
+                                ApprovalType.CONFIRMATION,
+                                "Agent Confirmation",
+                                str(interrupt_item.value),
+                                {"interrupt": interrupt_item}
+                            )
+                            # Wait for response
+                            status = self.middleware.wait_for_approval(request, blocking=False)
+                
                 return {
                     "success": False,
-                    "message": "Interrupt received",
+                    "message": "Waiting for approval",
                     "data": result,
-                    "__interrupt__": result['__interrupt__'],
-                    "tools_used": result.get("tools_used", [])
+                    "__interrupt__": interrupt_data,
+                    "tools_used": result.get("tools_used", []),
+                    "needs_approval": True
                 }
             
             # Extract the response
             ai_response = self._extract_response(result)
+            
+            # Add to short-term memory
+            if self.memory_manager:
+                self.memory_manager.add_message("assistant", ai_response)
             
             return {
                 "success": True,
@@ -898,6 +973,10 @@ RULES:
             error_msg = str(e)
             # Provide helpful error for context length issues
             if "context_length_exceeded" in error_msg or "maximum context length" in error_msg:
+                # Clear memory and retry
+                if self.memory_manager:
+                    self.memory_manager.clear_session()
+                self.thread_id = str(uuid.uuid4())  # New thread
                 return {
                     "success": False,
                     "message": "The conversation got too long. Starting fresh. Please try your request again.",
@@ -924,48 +1003,217 @@ RULES:
                         return content
         return "Command processed successfully"
 
-    def process_command_streaming(self, user_input: str):
-        """Process a command with streaming output. Yields tokens as they arrive."""
+    def process_command_streaming(self, user_input: str) -> Generator[Dict[str, Any], None, None]:
+        """Process a command with realtime streaming output. Yields events as they arrive."""
         try:
-            messages = [{"role": "user", "content": user_input}]
+            # Add to short-term memory
+            if self.memory_manager:
+                self.memory_manager.add_message("user", user_input)
             
-            # Use stream method for streaming output
-            for chunk in self.agent.stream({"messages": messages}):
-                # Extract content from the chunk
-                if "messages" in chunk:
-                    for msg in chunk["messages"]:
-                        if hasattr(msg, 'content') and msg.content:
-                            yield {"type": "token", "content": msg.content}
-                        elif hasattr(msg, 'tool_calls') and msg.tool_calls:
-                            for tc in msg.tool_calls:
-                                yield {"type": "tool_call", "name": tc.get("name", "unknown")}
-                
-                # Handle agent node output
-                if "agent" in chunk:
-                    agent_output = chunk["agent"]
-                    if "messages" in agent_output:
-                        for msg in agent_output["messages"]:
-                            if hasattr(msg, 'content') and msg.content:
-                                yield {"type": "content", "content": msg.content}
-                
-                # Handle tool node output
-                if "tools" in chunk:
-                    yield {"type": "tool_result", "content": "Tool executed"}
+            # Get messages from memory
+            if self.memory_manager:
+                messages = self.memory_manager.get_messages_for_llm()
+                if not messages or messages[-1].get("content") != user_input:
+                    messages.append({"role": "user", "content": user_input})
+            else:
+                messages = [{"role": "user", "content": user_input}]
             
-            yield {"type": "done"}
+            # Thread config for checkpointing
+            config = {"configurable": {"thread_id": self.thread_id}}
+            
+            full_response = ""
+            tool_calls_made = []
+            
+            # Use stream method for realtime output
+            for chunk in self.agent.stream({"messages": messages}, config=config, stream_mode="updates"):
+                # Handle different chunk types
+                for node_name, node_output in chunk.items():
+                    if node_name == "agent":
+                        # Agent node - contains AI messages and tool calls
+                        if "messages" in node_output:
+                            for msg in node_output["messages"]:
+                                # AI content
+                                if hasattr(msg, 'content') and msg.content:
+                                    yield {"type": "token", "content": msg.content}
+                                    full_response = msg.content
+                                
+                                # Tool calls
+                                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                                    for tc in msg.tool_calls:
+                                        tool_name = tc.get("name", "unknown")
+                                        tool_calls_made.append(tool_name)
+                                        yield {
+                                            "type": "tool_call",
+                                            "name": tool_name,
+                                            "args": tc.get("args", {})
+                                        }
+                                        
+                                        # Record tool usage in memory
+                                        if self.memory_manager:
+                                            self.memory_manager.long_term.record_tool_usage(tool_name)
+                    
+                    elif node_name == "tools":
+                        # Tool execution results
+                        if "messages" in node_output:
+                            for msg in node_output["messages"]:
+                                if hasattr(msg, 'content'):
+                                    # Check for permission requests
+                                    content = str(msg.content)
+                                    if content.startswith("PERMISSION_REQUEST:"):
+                                        parts = content.split(":")
+                                        if len(parts) >= 4:
+                                            yield {
+                                                "type": "permission_request",
+                                                "permission": parts[1],
+                                                "tool": parts[2],
+                                                "reason": parts[3]
+                                            }
+                                    else:
+                                        yield {
+                                            "type": "tool_result",
+                                            "content": content[:500] if len(content) > 500 else content
+                                        }
+                    
+                    elif node_name == "__interrupt__":
+                        # Human-in-the-loop interrupt
+                        yield {
+                            "type": "interrupt",
+                            "data": node_output
+                        }
+            
+            # Add assistant response to memory
+            if self.memory_manager and full_response:
+                self.memory_manager.add_message("assistant", full_response, {"tools": tool_calls_made})
+            
+            yield {"type": "done", "tools_used": tool_calls_made}
             
         except Exception as e:
-            yield {"type": "error", "content": str(e)}
+            error_msg = str(e)
+            if "context_length_exceeded" in error_msg:
+                if self.memory_manager:
+                    self.memory_manager.clear_session()
+                self.thread_id = str(uuid.uuid4())
+                yield {"type": "error", "content": "Conversation too long. Please try again."}
+            else:
+                yield {"type": "error", "content": error_msg}
+    
+    def resume_from_interrupt(self, approved: bool, response_value: Any = None) -> Dict[str, Any]:
+        """Resume agent execution after human-in-the-loop interrupt."""
+        try:
+            from langgraph.types import Command
+            
+            # Create resume command
+            if approved:
+                resume_value = response_value if response_value else "approved"
+            else:
+                resume_value = "denied"
+            
+            # Resume with the response
+            config = {"configurable": {"thread_id": self.thread_id}}
+            result = self.agent.invoke(
+                Command(resume=resume_value),
+                config=config
+            )
+            
+            ai_response = self._extract_response(result)
+            
+            # Add to memory
+            if self.memory_manager:
+                self.memory_manager.add_message("assistant", ai_response)
+            
+            return {
+                "success": True,
+                "message": ai_response,
+                "data": {},
+                "tools_used": []
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Error resuming: {str(e)}",
+                "data": {},
+                "tools_used": []
+            }
+    
+    def get_pending_approvals(self) -> List[Dict[str, Any]]:
+        """Get pending approval requests from middleware."""
+        if self.middleware:
+            requests = self.middleware.get_pending_requests()
+            return [
+                {
+                    "id": r.id,
+                    "type": r.type.value,
+                    "title": r.title,
+                    "description": r.description,
+                    "options": r.options
+                }
+                for r in requests
+            ]
+        return []
+    
+    def respond_to_approval(self, request_id: str, approved: bool, remember: bool = False):
+        """Respond to an approval request."""
+        if self.middleware:
+            self.middleware.respond_to_request(request_id, approved, remember=remember)
 
     async def process_command_async(self, user_input: str) -> Dict[str, Any]:
         """Process a command asynchronously (for compatibility)."""
         return self.process_command(user_input)
 
     def get_conversation_history(self, session_id: str = None) -> List[Dict[str, Any]]:
-        """Get conversation history for a session."""
-        # Return empty - we don't persist history to avoid context overflow
+        """Get conversation history from memory."""
+        if self.memory_manager:
+            return self.memory_manager.get_messages_for_llm()
         return []
 
     def clear_conversation_history(self, session_id: str = None):
-        """Clear conversation history for a session."""
-        self.session_id = str(int(time.time())) 
+        """Clear conversation history and start fresh."""
+        self.session_id = str(int(time.time()))
+        self.thread_id = str(uuid.uuid4())
+        if self.memory_manager:
+            self.memory_manager.clear_session()
+        if self.middleware:
+            self.middleware.clear_session_approvals()
+    
+    def new_session(self):
+        """Start a completely new session."""
+        self.session_id = str(int(time.time()))
+        self.thread_id = str(uuid.uuid4())
+        if self.memory_manager:
+            self.memory_manager.clear_session()
+        if self.middleware:
+            self.middleware.clear_session_approvals()
+    
+    def remember(self, key: str, value: Any, category: str = "general"):
+        """Remember something in long-term memory."""
+        if self.memory_manager:
+            self.memory_manager.remember(key, value, category)
+    
+    def recall(self, key: str) -> Optional[Any]:
+        """Recall something from long-term memory."""
+        if self.memory_manager:
+            return self.memory_manager.recall(key)
+        return None
+    
+    def set_preference(self, key: str, value: Any):
+        """Set a user preference."""
+        if self.memory_manager:
+            self.memory_manager.set_preference(key, value)
+    
+    def get_preference(self, key: str, default: Any = None) -> Any:
+        """Get a user preference."""
+        if self.memory_manager:
+            return self.memory_manager.get_preference(key, default)
+        return default
+    
+    def get_conversation_summary(self) -> str:
+        """Get a summary of the current conversation."""
+        if self.memory_manager:
+            return self.memory_manager.get_summary()
+        return "No conversation history."
+    
+    def set_auto_approve(self, enabled: bool):
+        """Enable/disable auto-approve for human-in-the-loop."""
+        self.auto_approve = enabled
+        if self.middleware:
+            self.middleware.auto_approve = enabled

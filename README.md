@@ -165,6 +165,63 @@
 - Progress indicators for multi-step tasks
 - Duration and quality metrics
 
+### 🔄 Human-in-the-Loop (NEW!)
+
+**Middleware-Based Approvals:**
+- Permission requests with visual dialogs
+- Confirmation prompts for sensitive actions
+- "Remember my choice" option for recurring approvals
+- Session-level and persistent approval storage
+
+**Approval Types:**
+- `PERMISSION` - Request tool permissions
+- `CONFIRMATION` - Confirm potentially dangerous actions
+- `SENSITIVE_ACTION` - Sensitive operations (delete, modify system)
+- `EXECUTION` - Code/command execution approval
+- `FILE_WRITE` - File write confirmations
+
+**Interactive Dialogs:**
+- Modern approval dialogs in GUI
+- Clear action descriptions
+- Approve/Deny buttons with visual feedback
+- Remember choice checkbox
+
+### 🧠 Short-term Memory (NEW!)
+
+**Conversation Buffer:**
+- Sliding window of recent messages (20 messages default)
+- Token-aware context management (4000 token limit)
+- Automatic trimming to prevent context overflow
+- Conversation summarization
+
+**Long-term Memory:**
+- Persistent fact storage
+- User preference management
+- Usage pattern recording
+- Tool usage statistics
+- Context injection into system prompt
+
+**Memory Manager:**
+- Unified interface for short and long-term memory
+- Session-based memory isolation
+- Cross-session preference persistence
+- Memory export and import
+
+### ⚡ Realtime Streaming (NEW!)
+
+**Event-based Streaming:**
+- Token-by-token response streaming
+- Tool call notifications
+- Tool result updates
+- Permission request events
+- Interrupt handling events
+
+**Visual Feedback:**
+- Animated typing indicator
+- Tool execution progress
+- Approval dialog integration
+- Error recovery notifications
+
 ### 🏢 Enterprise Features (NEW!)
 
 **Session Management:**
@@ -586,6 +643,42 @@ sysagent monitor dismiss --all
 
 # Start background monitoring
 sysagent monitor start
+```
+
+### Memory & Preferences
+
+```bash
+# Remember something for later
+sysagent "remember that my favorite editor is vim"
+sysagent "remember my project directory is /home/user/myproject"
+
+# Recall remembered information
+sysagent "what's my favorite editor?"
+sysagent "where is my project directory?"
+
+# Set preferences
+sysagent "set my preference for theme to dark"
+sysagent "prefer verbose output"
+
+# The agent will automatically use these preferences
+sysagent "edit my config file"  # Will use vim
+sysagent "go to my project"      # Will cd to remembered directory
+```
+
+### Human-in-the-Loop
+
+```bash
+# Enable auto-approve mode (for automation)
+sysagent --auto-approve "delete all temp files"
+
+# Normal mode - will prompt for approval
+sysagent "delete all files in trash"
+# → Approval Required: Delete files in /trash? [Approve/Deny]
+
+# In GUI, approval dialogs appear with:
+# - Clear description of the action
+# - Approve/Deny buttons
+# - "Remember my choice" checkbox
 ```
 
 ### Plugin Management

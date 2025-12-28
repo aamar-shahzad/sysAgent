@@ -23,6 +23,11 @@ from .activity_tracker import ActivityTracker, Activity, ActivityType, get_activ
 from .smart_learning import SmartLearningSystem, get_learning_system
 from .proactive_monitor import ProactiveMonitor, Alert, AlertLevel, get_monitor, start_monitoring
 from .deep_agent import DeepAgent, TaskPlan, ReasoningStep, create_deep_agent
+from .memory import MemoryManager, ShortTermMemory, LongTermMemory, get_memory_manager, reset_memory_manager
+from .middleware import (
+    HumanInTheLoopMiddleware, ApprovalRequest, ApprovalStatus, ApprovalType,
+    get_middleware, reset_middleware
+)
 
 __all__ = [
     "SysAgent",
@@ -69,4 +74,17 @@ __all__ = [
     "TaskPlan",
     "ReasoningStep",
     "create_deep_agent",
+    # Memory Management
+    "MemoryManager",
+    "ShortTermMemory",
+    "LongTermMemory",
+    "get_memory_manager",
+    "reset_memory_manager",
+    # Human-in-the-Loop Middleware
+    "HumanInTheLoopMiddleware",
+    "ApprovalRequest",
+    "ApprovalStatus",
+    "ApprovalType",
+    "get_middleware",
+    "reset_middleware",
 ] 
