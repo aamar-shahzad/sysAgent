@@ -770,6 +770,134 @@ class LangGraphAgent:
             except Exception as e:
                 return f"Error: {str(e)}"
 
+        # Keyboard and mouse control tool
+        @tool
+        def keyboard_mouse(action: str, text: str = None, key: str = None, 
+                          shortcut: str = None, x: int = None, y: int = None,
+                          direction: str = None, amount: int = None) -> str:
+            """Control keyboard and mouse input. Actions: type (text), key (single key), hotkey (shortcut like cmd+c), click, double_click, right_click, move, scroll, drag, get_position."""
+            try:
+                if not self.permission_manager.has_permission("input_control"):
+                    return "PERMISSION_REQUEST:input_control:keyboard_mouse:Permission required for keyboard/mouse control"
+                
+                tool_params = {"action": action}
+                if text: tool_params["text"] = text
+                if key: tool_params["key"] = key
+                if shortcut: tool_params["shortcut"] = shortcut
+                if x is not None: tool_params["x"] = x
+                if y is not None: tool_params["y"] = y
+                if direction: tool_params["direction"] = direction
+                if amount: tool_params["amount"] = amount
+                
+                result = self.tool_executor.execute_tool("keyboard_mouse_tool", **tool_params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # Screenshot tool
+        @tool
+        def take_screenshot(action: str = "capture", path: str = None, 
+                           region: str = None, window: str = None) -> str:
+            """Capture screenshots. Actions: capture (full screen), region (area), window (specific window), list_windows. Saves to path or returns base64."""
+            try:
+                if not self.permission_manager.has_permission("screenshot"):
+                    return "PERMISSION_REQUEST:screenshot:take_screenshot:Permission required for screenshots"
+                
+                tool_params = {"action": action}
+                if path: tool_params["path"] = path
+                if region: tool_params["region"] = region
+                if window: tool_params["window"] = window
+                
+                result = self.tool_executor.execute_tool("screenshot_tool", **tool_params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # Scheduler tool
+        @tool
+        def schedule_task(action: str, name: str = None, command: str = None,
+                         schedule: str = None, time: str = None) -> str:
+            """Schedule tasks and reminders. Actions: create, list, delete, run_once. Schedule formats: 'daily 9:00', 'hourly', 'every 5 minutes', 'cron 0 9 * * *'."""
+            try:
+                tool_params = {"action": action}
+                if name: tool_params["name"] = name
+                if command: tool_params["command"] = command
+                if schedule: tool_params["schedule"] = schedule
+                if time: tool_params["time"] = time
+                
+                result = self.tool_executor.execute_tool("scheduler_tool", **tool_params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # Service management tool
+        @tool
+        def service_control(action: str, name: str = None) -> str:
+            """Manage system services. Actions: list, status, start, stop, restart, enable, disable."""
+            try:
+                if not self.permission_manager.has_permission("system_control"):
+                    return "PERMISSION_REQUEST:system_control:service_control:Permission required for service management"
+                
+                tool_params = {"action": action}
+                if name: tool_params["name"] = name
+                
+                result = self.tool_executor.execute_tool("service_tool", **tool_params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # Email tool
+        @tool
+        def send_email(action: str = "send", to: str = None, subject: str = None,
+                      body: str = None, attachment: str = None) -> str:
+            """Send emails. Actions: send, draft, list_drafts. Supports attachments."""
+            try:
+                if not self.permission_manager.has_permission("email"):
+                    return "PERMISSION_REQUEST:email:send_email:Permission required for email access"
+                
+                tool_params = {"action": action}
+                if to: tool_params["to"] = to
+                if subject: tool_params["subject"] = subject
+                if body: tool_params["body"] = body
+                if attachment: tool_params["attachment"] = attachment
+                
+                result = self.tool_executor.execute_tool("email_tool", **tool_params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # Voice tool
+        @tool
+        def voice_control(action: str, text: str = None) -> str:
+            """Voice input/output. Actions: speak (text-to-speech), listen (speech-to-text), dictate."""
+            try:
+                tool_params = {"action": action}
+                if text: tool_params["text"] = text
+                
+                result = self.tool_executor.execute_tool("voice_tool", **tool_params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # Auth/credentials tool
+        @tool
+        def credentials_manager(action: str, service: str = None, 
+                               username: str = None, password: str = None) -> str:
+            """Manage credentials securely. Actions: store, retrieve, delete, list."""
+            try:
+                if not self.permission_manager.has_permission("credentials"):
+                    return "PERMISSION_REQUEST:credentials:credentials_manager:Permission required for credential access"
+                
+                tool_params = {"action": action}
+                if service: tool_params["service"] = service
+                if username: tool_params["username"] = username
+                if password: tool_params["password"] = password
+                
+                result = self.tool_executor.execute_tool("auth_tool", **tool_params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
         tools.extend([
             file_operations, system_info, process_management, network_diagnostics, 
             system_control, generate_code, security_operations, automation_operations, 
@@ -777,7 +905,10 @@ class LangGraphAgent:
             document_operations, spreadsheet_operations, app_control, clipboard_operations,
             browser_control, window_control, media_control, send_notification,
             git_operations, http_request, package_manager,
-            workflow_operations, smart_search, system_insights, context_memory
+            workflow_operations, smart_search, system_insights, context_memory,
+            # New comprehensive OS control tools
+            keyboard_mouse, take_screenshot, schedule_task, service_control,
+            send_email, voice_control, credentials_manager
         ])
         return tools
 
@@ -790,11 +921,14 @@ class LangGraphAgent:
             DocumentTool, SpreadsheetTool, AppTool, ClipboardTool,
             BrowserTool, WindowTool, MediaTool, NotificationTool,
             GitTool, APITool, PackageManagerTool,
-            WorkflowTool, SmartSearchTool, SystemInsightsTool, ContextMemoryTool
+            WorkflowTool, SmartSearchTool, SystemInsightsTool, ContextMemoryTool,
+            KeyboardMouseTool, ScreenshotTool, SchedulerTool, ServiceTool,
+            EmailTool, VoiceTool, AuthTool
         )
         
-        # Register all tools
+        # Register all tools for complete OS control
         tools_to_register = [
+            # Core system tools
             FileTool(),
             SystemInfoTool(),
             ProcessTool(),
@@ -806,21 +940,36 @@ class LangGraphAgent:
             MonitoringTool(),
             OSIntelligenceTool(),
             LowLevelOSTool(),
+            # Document and data tools
             DocumentTool(),
             SpreadsheetTool(),
+            # Application and UI control
             AppTool(),
             ClipboardTool(),
             BrowserTool(),
             WindowTool(),
             MediaTool(),
             NotificationTool(),
+            # Input simulation
+            KeyboardMouseTool(),
+            ScreenshotTool(),
+            VoiceTool(),
+            # Development tools
             GitTool(),
             APITool(),
             PackageManagerTool(),
+            # Automation and scheduling
             WorkflowTool(),
+            SchedulerTool(),
+            ServiceTool(),
+            # Communication
+            EmailTool(),
+            # Memory and intelligence
             SmartSearchTool(),
             SystemInsightsTool(),
             ContextMemoryTool(),
+            # Security
+            AuthTool(),
         ]
         
         for tool in tools_to_register:
@@ -833,66 +982,87 @@ class LangGraphAgent:
         if self.memory_manager:
             memory_context = self.memory_manager.get_system_context()
         
-        system_prompt = f"""You are SysAgent, an expert system administrator AI with complete machine control.
+        system_prompt = f"""You are SysAgent, an AI that gives users COMPLETE control over their computer through natural language.
+You can do ANYTHING the user normally does with keyboard and mouse - from Excel to browsers to system settings.
 
-TOOL SELECTION GUIDE - Choose the RIGHT tool for the task:
+🎯 COMPLETE OS CONTROL - Your capabilities:
+
+⌨️ INPUT CONTROL:
+• keyboard_mouse(action="type", text="X") - Type any text
+• keyboard_mouse(action="key", key="enter"|"tab"|"escape") - Press keys
+• keyboard_mouse(action="hotkey", shortcut="cmd+c"|"ctrl+v") - Keyboard shortcuts
+• keyboard_mouse(action="click", x=N, y=N) - Click anywhere
+• keyboard_mouse(action="scroll", direction="up"|"down") - Scroll
+• keyboard_mouse(action="move", x=N, y=N) - Move mouse
+
+📱 APPLICATION CONTROL:
+• app_control(action="launch"|"close"|"focus", app_name="X") - Open/close/switch apps
+• window_control(action="tile_left"|"tile_right"|"maximize"|"minimize"|"resize") - Window management
+• browser_control(action="open", url="X") or (action="search", query="X") - Web browsing
+
+📊 SPREADSHEETS & DOCUMENTS:
+• spreadsheet_operations(action="create_excel"|"create_template", template="budget"|"inventory") - Create Excel/CSV
+• document_operations(action="create_note"|"create", content="X") - Create documents
+• file_operations(action="read"|"write"|"list"|"delete", path="X") - File management
+
+🎵 MEDIA & AUDIO:
+• media_control(action="volume", level=50) - Set volume 0-100
+• media_control(action="mute"|"unmute"|"play_pause"|"next"|"previous") - Media controls
+
+📸 SCREEN & VISUAL:
+• take_screenshot(action="capture", path="X") - Take screenshots
+• clipboard_operations(action="copy"|"paste", text="X") - Clipboard control
 
 📊 SYSTEM MONITORING:
-• system_info(action="overview"|"cpu"|"memory"|"disk"|"battery"|"network") - Real-time metrics
-• system_insights(action="health_check"|"quick_insights"|"performance"|"recommendations") - AI analysis
-• system_insights(action="resource_hogs") - Find heavy processes
-• system_insights(action="storage_analysis") - Disk usage analysis
-
-⚙️ PROCESS & APPS:
-• process_management(action="list"|"kill", pid=N, name="X") - Process control
-• app_control(action="launch"|"close"|"list_running", app_name="X") - App management
-
-📁 FILES & SEARCH:
-• file_operations(action="list"|"read"|"write"|"delete", path="X") - File operations
-• smart_search(action="files"|"apps"|"content", query="X") - Find anything
-• smart_search(action="recent") - Recently modified files
+• system_info(action="overview"|"cpu"|"memory"|"disk"|"battery") - Real-time stats
+• system_insights(action="health_check"|"recommendations"|"resource_hogs") - AI analysis
+• process_management(action="list"|"kill", name="X") - Process control
 
 🌐 NETWORK & WEB:
-• browser_control(action="open"|"search", url="X", query="X") - Browser control
+• browser_control(action="open", url="X") - Open websites
+• browser_control(action="search", query="X") - Search the web
+• http_request(action="get"|"post", url="X") - API requests
 • network_diagnostics(action="ping"|"ports", host="X") - Network tools
-• http_request(action="get"|"post", url="X") - API calls
 
-🔧 SYSTEM CONTROL:
-• media_control(action="volume"|"mute"|"play_pause", level=N) - Audio control
-• window_control(action="list"|"tile_left"|"minimize") - Window management
-• package_manager(action="install"|"update", package="X") - Software management
+📧 COMMUNICATION:
+• send_email(to="X", subject="Y", body="Z") - Send emails
 • send_notification(title="X", message="Y") - System notifications
+• voice_control(action="speak", text="X") - Text-to-speech
 
-📝 DOCUMENTS:
-• document_operations(action="create_note"|"create", content="X", title="Y") - Notes/docs
-• spreadsheet_operations(action="create_excel"|"create_template", template="budget") - Spreadsheets
+⏰ AUTOMATION:
+• workflow_operations(action="run", name="morning_routine") - Run workflows
+• schedule_task(action="create", command="X", schedule="daily 9:00") - Schedule tasks
+• service_control(action="start"|"stop"|"restart", name="X") - Manage services
 
-🔄 AUTOMATION:
-• workflow_operations(action="run"|"list"|"templates", name="X") - Workflows
-• git_operations(action="status"|"commit"|"pull"|"push") - Git commands
-• context_memory(action="remember"|"recall", key="X", value="Y") - Remember things
+🔧 DEVELOPMENT:
+• git_operations(action="status"|"commit"|"pull"|"push") - Git control
+• package_manager(action="install"|"update", package="X") - Install software
+• generate_code(description="X", language="python") - Code generation
 
-QUICK MAPPINGS:
-• "system status/info/overview" → system_info(action="overview")
-• "cpu/processor usage" → system_info(action="cpu")  
-• "memory/ram usage" → system_info(action="memory")
-• "disk/storage space" → system_info(action="disk")
-• "health check/diagnose" → system_insights(action="health_check")
-• "quick insights" → system_insights(action="quick_insights")
-• "what's using cpu/memory" → system_insights(action="resource_hogs")
-• "list processes" → process_management(action="list")
-• "find/search files" → smart_search(action="files", query="X")
-• "open google/website" → browser_control(action="open", url="X")
-• "set volume to X" → media_control(action="volume", level=X)
-• "run workflow" → workflow_operations(action="run", name="X")
+🔍 SEARCH & MEMORY:
+• smart_search(action="files"|"apps"|"content", query="X") - Find anything
+• context_memory(action="remember"|"recall", key="X") - Remember preferences
+
+EXAMPLES - Common user requests:
+• "Open Excel" → app_control(action="launch", app_name="Excel")
+• "Type hello world" → keyboard_mouse(action="type", text="hello world")
+• "Press Ctrl+C" → keyboard_mouse(action="hotkey", shortcut="ctrl+c")
+• "Click at 100, 200" → keyboard_mouse(action="click", x=100, y=200)
+• "Set volume to 50%" → media_control(action="volume", level=50)
+• "Take a screenshot" → take_screenshot(action="capture")
+• "Open google.com" → browser_control(action="open", url="https://google.com")
+• "Search for python tutorials" → browser_control(action="search", query="python tutorials")
+• "Create a budget spreadsheet" → spreadsheet_operations(action="create_template", template="budget")
+• "Show system status" → system_info(action="overview")
+• "What's using my CPU" → system_insights(action="resource_hogs")
+• "Tile windows left and right" → window_control(action="tile_left") then (action="tile_right")
 
 RULES:
-1. ALWAYS call a tool - never make up data
-2. Call ONE tool at a time - be fast and focused
-3. Use specific actions - match user intent precisely
-4. Keep responses concise - focus on results
-5. For ambiguous requests, use the most relevant tool
-6. For sensitive operations (delete, modify system), ask for confirmation
+1. ALWAYS call a tool - you CAN do anything the user asks
+2. For keyboard/mouse operations, use keyboard_mouse tool
+3. For app control, use app_control or browser_control
+4. Be fast and responsive - one action at a time
+5. Confirm sensitive operations (delete files, system changes)
 
 {memory_context}"""
 
