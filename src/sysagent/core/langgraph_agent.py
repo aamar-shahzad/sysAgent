@@ -558,11 +558,123 @@ class LangGraphAgent:
             except Exception as e:
                 return f"Error with clipboard: {str(e)}"
 
+        # Browser control tool
+        @tool
+        def browser_control(action: str, url: str = None, browser: str = None, query: str = None) -> str:
+            """Control web browsers. Actions: open, search, close, list_browsers, get_bookmarks."""
+            try:
+                params = {"action": action}
+                if url: params["url"] = url
+                if browser: params["browser"] = browser
+                if query: params["query"] = query
+                
+                result = self.tool_executor.execute_tool("browser_tool", **params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # Window management tool
+        @tool
+        def window_control(action: str, app: str = None, x: int = None, y: int = None, 
+                          width: int = None, height: int = None) -> str:
+            """Manage windows. Actions: list, focus, minimize, maximize, tile_left, tile_right, resize, move, close."""
+            try:
+                params = {"action": action}
+                if app: params["app"] = app
+                if x is not None: params["x"] = x
+                if y is not None: params["y"] = y
+                if width: params["width"] = width
+                if height: params["height"] = height
+                
+                result = self.tool_executor.execute_tool("window_tool", **params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # Media control tool
+        @tool
+        def media_control(action: str, level: int = None) -> str:
+            """Control audio/media. Actions: volume, mute, unmute, play_pause, next, previous, get_volume."""
+            try:
+                params = {"action": action}
+                if level is not None: params["level"] = level
+                
+                result = self.tool_executor.execute_tool("media_tool", **params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # Notification tool
+        @tool
+        def send_notification(title: str = "SysAgent", message: str = "") -> str:
+            """Send system notification."""
+            try:
+                result = self.tool_executor.execute_tool("notification_tool", action="send", title=title, message=message)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # Git operations tool
+        @tool
+        def git_operations(action: str, message: str = None, branch: str = None, 
+                          url: str = None, path: str = None) -> str:
+            """Git version control. Actions: status, clone, pull, push, commit, add, branch, checkout, log."""
+            try:
+                params = {"action": action}
+                if message: params["message"] = message
+                if branch: params["branch"] = branch
+                if url: params["url"] = url
+                if path: params["path"] = path
+                
+                result = self.tool_executor.execute_tool("git_tool", **params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # API/HTTP requests tool
+        @tool
+        def http_request(action: str, url: str, data: str = None, headers: str = None) -> str:
+            """Make HTTP requests. Actions: get, post, put, delete, download."""
+            try:
+                import json as json_lib
+                params = {"action": action, "url": url}
+                if data:
+                    try:
+                        params["json"] = json_lib.loads(data)
+                    except:
+                        params["data"] = data
+                if headers:
+                    try:
+                        params["headers"] = json_lib.loads(headers)
+                    except:
+                        pass
+                
+                result = self.tool_executor.execute_tool("api_tool", **params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # Package manager tool
+        @tool
+        def package_manager(action: str, package: str = None, query: str = None) -> str:
+            """Manage software packages. Actions: install, uninstall, update, upgrade, search, list."""
+            try:
+                params = {"action": action}
+                if package: params["package"] = package
+                if query: params["query"] = query
+                
+                result = self.tool_executor.execute_tool("package_manager_tool", **params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
         tools.extend([
             file_operations, system_info, process_management, network_diagnostics, 
             system_control, generate_code, security_operations, automation_operations, 
             monitoring_operations, os_intelligence, low_level_os,
-            document_operations, spreadsheet_operations, app_control, clipboard_operations
+            document_operations, spreadsheet_operations, app_control, clipboard_operations,
+            browser_control, window_control, media_control, send_notification,
+            git_operations, http_request, package_manager
         ])
         return tools
 
@@ -572,7 +684,9 @@ class LangGraphAgent:
             FileTool, SystemInfoTool, ProcessTool, NetworkTool, 
             SystemControlTool, CodeGenerationTool, SecurityTool, 
             AutomationTool, MonitoringTool, OSIntelligenceTool, LowLevelOSTool,
-            DocumentTool, SpreadsheetTool, AppTool, ClipboardTool
+            DocumentTool, SpreadsheetTool, AppTool, ClipboardTool,
+            BrowserTool, WindowTool, MediaTool, NotificationTool,
+            GitTool, APITool, PackageManagerTool
         )
         
         # Register all tools
@@ -592,6 +706,13 @@ class LangGraphAgent:
             SpreadsheetTool(),
             AppTool(),
             ClipboardTool(),
+            BrowserTool(),
+            WindowTool(),
+            MediaTool(),
+            NotificationTool(),
+            GitTool(),
+            APITool(),
+            PackageManagerTool(),
         ]
         
         for tool in tools_to_register:
@@ -601,22 +722,29 @@ class LangGraphAgent:
         """Create the React agent using langgraph.prebuilt."""
         system_prompt = """You are SysAgent, an intelligent assistant that controls the operating system using natural language.
 
-TOOLS AVAILABLE:
-- file_operations: File system operations (list, read, write, delete)
-- system_info: System metrics (CPU, memory, disk, OS info)
-- process_management: Process control (list, kill, monitor)
-- network_diagnostics: Network tools (ping, port scan, connectivity)
-- system_control: Services, power, user management
-- generate_code: Execute Python code for custom tasks
-- security_operations: Security audits and monitoring
-- automation_operations: Task scheduling and workflows
-- monitoring_operations: Resource monitoring and alerts
-- os_intelligence: Advanced OS analysis and optimization
-- low_level_os: Low-level OS access and hardware data
-- document_operations: Create/edit documents, notes, text files (use for Notepad, Notes, text docs)
-- spreadsheet_operations: Create Excel/CSV files, data entry forms, budgets, inventories
-- app_control: Launch/close applications (Excel, Notepad, browsers, etc.)
-- clipboard_operations: Copy/paste clipboard operations
+TOOLS AVAILABLE (22 tools):
+- file_operations: File operations (list, read, write, delete)
+- system_info: System metrics (CPU, memory, disk)
+- process_management: Process control (list, kill)
+- network_diagnostics: Network tools (ping, ports)
+- system_control: Services, power management
+- generate_code: Execute Python code
+- security_operations: Security scanning
+- automation_operations: Task scheduling
+- monitoring_operations: Resource monitoring
+- os_intelligence: OS analysis
+- low_level_os: Hardware data
+- document_operations: Create notes, documents, text files
+- spreadsheet_operations: Create Excel/CSV, data entry forms, budgets
+- app_control: Launch/close applications
+- clipboard_operations: Copy/paste
+- browser_control: Open URLs, search web, manage browsers
+- window_control: Resize, move, tile, minimize windows
+- media_control: Volume, mute, play/pause media
+- send_notification: Send system notifications
+- git_operations: Git commands (status, commit, push, pull)
+- http_request: Make API calls (GET, POST, etc.)
+- package_manager: Install/update software packages
 
 INSTRUCTIONS:
 1. Use tools to get real system information - never make up data

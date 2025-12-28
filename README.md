@@ -14,27 +14,48 @@
 - Support for OpenAI, Ollama, and local models
 - Context-aware responses and suggestions
 
-### 🛠️ Comprehensive System Tools (20 Tools)
+### 🛠️ Comprehensive System Tools (29 Tools)
+
+**Core System Tools:**
 - **FileTool**: File operations, cleanup, organization
 - **SystemInfoTool**: Real-time system metrics and monitoring
 - **ProcessTool**: Process management and control
 - **NetworkTool**: Network diagnostics and connectivity
-- **AppTool**: Application launching and management
-- **SchedulerTool**: Task scheduling and cron job management
-- **ServiceTool**: System service control (start/stop/restart)
 - **SystemControlTool**: System power and control operations
-- **ClipboardTool**: Clipboard operations
-- **AuthTool**: Secure credential management
-- **ScreenshotTool**: Screen capture and analysis
-- **VoiceTool**: Voice input/output capabilities
 - **SecurityTool**: Security scanning and management
 - **MonitoringTool**: System monitoring and alerts
-- **AutomationTool**: Workflow automation
+
+**Application & Window Control:**
+- **AppTool**: Application launching and management
+- **BrowserTool**: Web browser control, open URLs, search, bookmarks
+- **WindowTool**: Window management (resize, move, tile, minimize, maximize)
+- **KeyboardMouseTool**: Keyboard/mouse input simulation
+
+**Media & Notifications:**
+- **MediaTool**: Volume control, mute, play/pause, next/previous track
+- **NotificationTool**: System notifications and alerts
+- **ClipboardTool**: Clipboard operations
+- **ScreenshotTool**: Screen capture and analysis
+- **VoiceTool**: Voice input/output capabilities
+
+**Documents & Data:**
+- **DocumentTool**: Create/edit documents, notes, text files
+- **SpreadsheetTool**: Create Excel/CSV, data entry forms, budgets
+
+**Development & Automation:**
+- **GitTool**: Git operations (clone, commit, push, pull, branch)
+- **APITool**: HTTP requests (GET, POST, PUT, DELETE)
 - **CodeGenerationTool**: Code generation and execution
+- **PackageManagerTool**: Software install/update (brew, apt, winget)
+- **EmailTool**: Send emails with attachments
+
+**System Management:**
+- **SchedulerTool**: Task scheduling and cron jobs
+- **ServiceTool**: System service control
+- **AuthTool**: Secure credential management
+- **AutomationTool**: Workflow automation
 - **OSIntelligenceTool**: OS-specific optimizations
 - **LowLevelOSTool**: Low-level OS operations
-- **DocumentTool**: Create/edit documents, notes, and text files
-- **SpreadsheetTool**: Create Excel/CSV files, data entry forms, templates
 
 ### 🖥️ GUI Features
 - **Chat Interface**: Natural language interaction with SysAgent in a beautiful GUI
@@ -131,6 +152,63 @@ sysagent "create an Excel sheet for expense tracking"
 sysagent "make a data entry form with name, email, phone"
 sysagent "create a budget spreadsheet"
 sysagent "create an inventory list template"
+```
+
+### Browser & Web
+
+```bash
+# Browser control
+sysagent "open google.com"
+sysagent "search youtube for python tutorials"
+sysagent "open Chrome in incognito mode"
+sysagent "show my bookmarks"
+
+# API requests
+sysagent "make a GET request to api.github.com"
+sysagent "download file from https://example.com/file.zip"
+```
+
+### Window & Media Control
+
+```bash
+# Window management
+sysagent "tile my windows left and right"
+sysagent "minimize all windows"
+sysagent "maximize the current window"
+sysagent "list all open windows"
+
+# Media control
+sysagent "set volume to 50%"
+sysagent "mute the audio"
+sysagent "play next track"
+sysagent "what song is playing?"
+```
+
+### Git & Development
+
+```bash
+# Git operations
+sysagent "git status"
+sysagent "commit with message 'fix bug'"
+sysagent "pull latest changes"
+sysagent "show recent commits"
+
+# Package management
+sysagent "install vim"
+sysagent "update all packages"
+sysagent "search for python packages"
+```
+
+### Notifications & Email
+
+```bash
+# Notifications
+sysagent "send me a notification saying 'Meeting in 5 minutes'"
+sysagent "set a reminder for 3pm"
+
+# Email
+sysagent "compose email to john@example.com"
+sysagent "send email with subject 'Report' to team@company.com"
 ```
 
 ### Advanced Features
