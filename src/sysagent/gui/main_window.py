@@ -277,7 +277,8 @@ class MainWindow:
                     on_command=self._on_palette_command
                 )
             
-            if self.command_palette.is_open:
+            # Check if palette popup exists
+            if self.command_palette.popup is not None:
                 self.command_palette.close()
             else:
                 self.command_palette.open()
@@ -754,8 +755,10 @@ class MainWindow:
                 # User needs to complete the command
                 self.chat_interface._set_input_text(action)
                 try:
-                    self.chat_interface.input_field.focus_set()
-                except:
+                    # Focus the input field
+                    if hasattr(self.chat_interface, 'input_field'):
+                        self.chat_interface.input_field.focus_set()
+                except Exception:
                     pass
             else:
                 # Send directly
