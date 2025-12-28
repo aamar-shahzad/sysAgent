@@ -828,6 +828,51 @@ def version():
     console.print(f"Python: {sys.version}")
 
 
+@cli.command()
+@click.pass_context
+def gui(ctx):
+    """Launch the graphical user interface."""
+    console.print("[blue]Launching SysAgent GUI...[/blue]")
+    try:
+        from ..gui import launch_gui
+        launch_gui()
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] GUI dependencies not installed. Install with: pip install sysagent-cli[gui]")
+        console.print(f"[dim]Details: {e}[/dim]")
+    except Exception as e:
+        console.print(f"[red]Error launching GUI:[/red] {e}")
+
+
+@cli.command()
+@click.pass_context
+def settings(ctx):
+    """Open the settings GUI."""
+    console.print("[blue]Opening SysAgent Settings...[/blue]")
+    try:
+        from ..gui import launch_settings
+        launch_settings()
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] GUI dependencies not installed. Install with: pip install sysagent-cli[gui]")
+        console.print(f"[dim]Details: {e}[/dim]")
+    except Exception as e:
+        console.print(f"[red]Error opening settings:[/red] {e}")
+
+
+@cli.command()
+@click.pass_context
+def dashboard(ctx):
+    """Open the system dashboard GUI."""
+    console.print("[blue]Opening SysAgent Dashboard...[/blue]")
+    try:
+        from ..gui import launch_dashboard
+        launch_dashboard()
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] GUI dependencies not installed. Install with: pip install sysagent-cli[gui]")
+        console.print(f"[dim]Details: {e}[/dim]")
+    except Exception as e:
+        console.print(f"[red]Error opening dashboard:[/red] {e}")
+
+
 # Add langgraph command group to main CLI
 cli.add_command(langgraph)
 
