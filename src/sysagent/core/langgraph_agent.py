@@ -7,7 +7,7 @@ import asyncio
 import os
 import time
 import uuid
-from typing import Dict, List, Any, Optional, TypedDict, Generator
+from typing import Dict, List, Any, Optional, TypedDict, Generator, Tuple
 from datetime import datetime
 from pathlib import Path
 
@@ -31,11 +31,15 @@ except ImportError:
     MemoryManager = None
 
 try:
-    from .middleware import HumanInTheLoopMiddleware, get_middleware, ApprovalType
+    from .middleware import (
+        HumanInTheLoopMiddleware, get_middleware, ApprovalType,
+        BreakpointType, Breakpoint, StateSnapshot, FeedbackEntry
+    )
     MIDDLEWARE_AVAILABLE = True
 except ImportError:
     MIDDLEWARE_AVAILABLE = False
     HumanInTheLoopMiddleware = None
+    BreakpointType = None
 
 
 class AgentState(TypedDict):
@@ -1217,3 +1221,382 @@ RULES:
         self.auto_approve = enabled
         if self.middleware:
             self.middleware.auto_approve = enabled
+    
+    # === Advanced Human-in-the-Loop Features ===
+    
+    def add_breakpoint(
+        self,
+        bp_type: str = "before_tool",
+        tool_name: str = None,
+        condition: str = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Add a breakpoint to pause execution.
+        
+        Types: before_tool, after_tool, on_error, on_sensitive, periodic, conditional
+        """
+        if not MIDDLEWARE_AVAILABLE or not self.middleware:
+            return None
+        
+        bp_type_enum = {
+            "before_tool": BreakpointType.BEFORE_TOOL,
+            "after_tool": BreakpointType.AFTER_TOOL,
+            "on_error": BreakpointType.ON_ERROR,
+            "on_sensitive": BreakpointType.ON_SENSITIVE,
+            "periodic": BreakpointType.PERIODIC,
+            "conditional": BreakpointType.CONDITIONAL,
+            "manual": BreakpointType.MANUAL,
+        }.get(bp_type, BreakpointType.BEFORE_TOOL)
+        
+        bp = self.middleware.add_breakpoint(bp_type_enum, tool_name, condition)
+        return {"id": bp.id, "type": bp.type.value, "enabled": bp.enabled}
+    
+    def remove_breakpoint(self, bp_id: str) -> bool:
+        """Remove a breakpoint."""
+        if self.middleware:
+            return self.middleware.remove_breakpoint(bp_id)
+        return False
+    
+    def get_breakpoints(self) -> List[Dict[str, Any]]:
+        """Get all breakpoints."""
+        if self.middleware:
+            return [
+                {"id": bp.id, "type": bp.type.value, "enabled": bp.enabled, "hit_count": bp.hit_count}
+                for bp in self.middleware.get_breakpoints()
+            ]
+        return []
+    
+    def pause_execution(self):
+        """Pause agent execution."""
+        if self.middleware:
+            self.middleware.pause()
+    
+    def resume_execution(self):
+        """Resume agent execution."""
+        if self.middleware:
+            self.middleware.resume()
+    
+    def is_paused(self) -> bool:
+        """Check if agent is paused."""
+        if self.middleware:
+            return self.middleware.is_paused()
+        return False
+    
+    # === Time-Travel / State Management ===
+    
+    def save_state_snapshot(self, metadata: Dict[str, Any] = None) -> Optional[str]:
+        """Save current state for time-travel."""
+        if not self.middleware or not self.memory_manager:
+            return None
+        
+        messages = self.memory_manager.get_messages_for_llm()
+        snapshot = self.middleware.save_state(messages, metadata=metadata)
+        return snapshot.id
+    
+    def get_state_history(self) -> List[Dict[str, Any]]:
+        """Get state snapshot history."""
+        if self.middleware:
+            return [
+                {
+                    "id": s.id,
+                    "step": s.step_number,
+                    "timestamp": s.timestamp,
+                    "message_count": len(s.messages),
+                    "tools_used": s.tools_used
+                }
+                for s in self.middleware.get_state_history()
+            ]
+        return []
+    
+    def rollback_to_state(self, snapshot_id: str) -> bool:
+        """Rollback to a previous state."""
+        if not self.middleware:
+            return False
+        
+        snapshot = self.middleware.rollback_to(snapshot_id)
+        if snapshot and self.memory_manager:
+            # Restore messages to memory
+            self.memory_manager.clear_session()
+            for msg in snapshot.messages:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                self.memory_manager.add_message(role, content)
+            return True
+        return False
+    
+    def rollback_steps(self, num_steps: int) -> bool:
+        """Rollback by a number of steps."""
+        if not self.middleware:
+            return False
+        
+        snapshot = self.middleware.rollback_steps(num_steps)
+        if snapshot and self.memory_manager:
+            self.memory_manager.clear_session()
+            for msg in snapshot.messages:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                self.memory_manager.add_message(role, content)
+            return True
+        return False
+    
+    # === Feedback Collection ===
+    
+    def submit_feedback(
+        self,
+        rating: int,
+        comment: str = None,
+        tool_name: str = None,
+        tags: List[str] = None
+    ) -> Optional[str]:
+        """Submit feedback on agent actions."""
+        if self.middleware:
+            feedback = self.middleware.collect_feedback(
+                rating=rating,
+                comment=comment,
+                tool_name=tool_name,
+                tags=tags
+            )
+            return feedback.id
+        return None
+    
+    def get_feedback_summary(self) -> Dict[str, Any]:
+        """Get feedback summary."""
+        if self.middleware:
+            feedback_list = self.middleware.get_feedback()
+            avg_rating = self.middleware.get_average_rating()
+            return {
+                "total_feedback": len(feedback_list),
+                "average_rating": round(avg_rating, 2),
+                "recent": [
+                    {"rating": f.rating, "comment": f.comment, "tool": f.tool_name}
+                    for f in feedback_list[-5:]
+                ]
+            }
+        return {"total_feedback": 0, "average_rating": 0, "recent": []}
+    
+    def export_feedback(self, path: str = None) -> str:
+        """Export all feedback to JSON."""
+        if self.middleware:
+            return self.middleware.export_feedback(path)
+        return "[]"
+    
+    # === Dynamic Routing ===
+    
+    def redirect_with_instruction(self, new_instruction: str) -> Dict[str, Any]:
+        """Redirect the agent with a new instruction."""
+        if self.memory_manager:
+            # Add the redirect as a user message
+            self.memory_manager.add_message("user", f"[REDIRECT] {new_instruction}")
+        
+        # Process the new instruction
+        return self.process_command(new_instruction)
+    
+    # === Review Actions ===
+    
+    def review_before_action(
+        self,
+        action_name: str,
+        action_params: Dict[str, Any],
+        editable_fields: List[str] = None
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Request human review before executing an action.
+        Returns (approved, possibly_modified_params).
+        """
+        if not self.middleware or self.auto_approve:
+            return True, action_params
+        
+        return self.middleware.review_action(action_name, action_params, editable_fields)
+    
+    # === Approval Workflows ===
+    
+    def define_approval_workflow(self, name: str, steps: List[str]):
+        """
+        Define a multi-step approval workflow.
+        Steps should be approval types: permission, confirmation, sensitive, execution, etc.
+        """
+        if self.middleware:
+            step_types = []
+            for step in steps:
+                approval_type = {
+                    "permission": ApprovalType.PERMISSION,
+                    "confirmation": ApprovalType.CONFIRMATION,
+                    "sensitive": ApprovalType.SENSITIVE_ACTION,
+                    "execution": ApprovalType.EXECUTION,
+                    "network": ApprovalType.NETWORK,
+                    "file_write": ApprovalType.FILE_WRITE,
+                    "review": ApprovalType.REVIEW,
+                }.get(step, ApprovalType.CONFIRMATION)
+                step_types.append(approval_type)
+            self.middleware.define_workflow(name, step_types)
+    
+    def run_approval_workflow(
+        self,
+        workflow_name: str,
+        title: str,
+        description: str
+    ) -> bool:
+        """Run a multi-step approval workflow. Returns True if all steps approved."""
+        if not self.middleware:
+            return True
+        
+        requests = self.middleware.run_workflow(workflow_name, title, description)
+        return all(r.status.value == "approved" for r in requests)
+    
+    # === Statistics ===
+    
+    def get_middleware_stats(self) -> Dict[str, Any]:
+        """Get human-in-the-loop statistics."""
+        if self.middleware:
+            return self.middleware.get_stats()
+        return {}
+    
+    # === Process with Breakpoint Support ===
+    
+    def process_command_with_breakpoints(
+        self,
+        user_input: str
+    ) -> Generator[Dict[str, Any], None, None]:
+        """
+        Process command with breakpoint and state snapshot support.
+        Yields events including breakpoint hits and state snapshots.
+        """
+        try:
+            # Save initial state
+            if self.middleware and self.memory_manager:
+                self.middleware.save_state(
+                    self.memory_manager.get_messages_for_llm(),
+                    metadata={"input": user_input}
+                )
+            
+            # Add to memory
+            if self.memory_manager:
+                self.memory_manager.add_message("user", user_input)
+            
+            # Get messages
+            if self.memory_manager:
+                messages = self.memory_manager.get_messages_for_llm()
+                if not messages or messages[-1].get("content") != user_input:
+                    messages.append({"role": "user", "content": user_input})
+            else:
+                messages = [{"role": "user", "content": user_input}]
+            
+            config = {"configurable": {"thread_id": self.thread_id}}
+            full_response = ""
+            tool_calls_made = []
+            
+            for chunk in self.agent.stream({"messages": messages}, config=config, stream_mode="updates"):
+                # Check if paused
+                if self.middleware and self.middleware.is_paused():
+                    yield {"type": "paused", "message": "Execution paused by user"}
+                    self.middleware.wait_if_paused()
+                    yield {"type": "resumed", "message": "Execution resumed"}
+                
+                for node_name, node_output in chunk.items():
+                    if node_name == "agent":
+                        if "messages" in node_output:
+                            for msg in node_output["messages"]:
+                                if hasattr(msg, 'content') and msg.content:
+                                    yield {"type": "token", "content": msg.content}
+                                    full_response = msg.content
+                                
+                                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                                    for tc in msg.tool_calls:
+                                        tool_name = tc.get("name", "unknown")
+                                        
+                                        # Check breakpoints before tool
+                                        if self.middleware:
+                                            bp = self.middleware.check_breakpoint(
+                                                tool_name=tool_name,
+                                                context={"tool": tool_name, "args": tc.get("args", {})}
+                                            )
+                                            if bp:
+                                                yield {
+                                                    "type": "breakpoint",
+                                                    "breakpoint_id": bp.id,
+                                                    "breakpoint_type": bp.type.value,
+                                                    "tool": tool_name
+                                                }
+                                                # Wait if paused
+                                                self.middleware.wait_if_paused()
+                                        
+                                        tool_calls_made.append(tool_name)
+                                        yield {
+                                            "type": "tool_call",
+                                            "name": tool_name,
+                                            "args": tc.get("args", {})
+                                        }
+                                        
+                                        if self.memory_manager:
+                                            self.memory_manager.long_term.record_tool_usage(tool_name)
+                    
+                    elif node_name == "tools":
+                        if "messages" in node_output:
+                            for msg in node_output["messages"]:
+                                if hasattr(msg, 'content'):
+                                    content = str(msg.content)
+                                    
+                                    # Check for errors (trigger error breakpoint)
+                                    is_error = content.startswith("Error") or "exception" in content.lower()
+                                    if is_error and self.middleware:
+                                        bp = self.middleware.check_breakpoint(is_error=True)
+                                        if bp:
+                                            yield {
+                                                "type": "breakpoint",
+                                                "breakpoint_id": bp.id,
+                                                "breakpoint_type": "on_error",
+                                                "error": content[:100]
+                                            }
+                                    
+                                    if content.startswith("PERMISSION_REQUEST:"):
+                                        parts = content.split(":")
+                                        if len(parts) >= 4:
+                                            yield {
+                                                "type": "permission_request",
+                                                "permission": parts[1],
+                                                "tool": parts[2],
+                                                "reason": parts[3]
+                                            }
+                                    else:
+                                        yield {
+                                            "type": "tool_result",
+                                            "content": content[:500] if len(content) > 500 else content
+                                        }
+                    
+                    elif node_name == "__interrupt__":
+                        yield {"type": "interrupt", "data": node_output}
+                
+                # Save state after each chunk
+                if self.middleware and self.memory_manager:
+                    self.middleware.save_state(
+                        self.memory_manager.get_messages_for_llm(),
+                        tools_used=tool_calls_made
+                    )
+            
+            # Add response to memory
+            if self.memory_manager and full_response:
+                self.memory_manager.add_message("assistant", full_response, {"tools": tool_calls_made})
+            
+            yield {"type": "done", "tools_used": tool_calls_made}
+            
+        except Exception as e:
+            error_msg = str(e)
+            
+            # Check error breakpoint
+            if self.middleware:
+                bp = self.middleware.check_breakpoint(is_error=True)
+                if bp:
+                    yield {
+                        "type": "breakpoint",
+                        "breakpoint_id": bp.id,
+                        "breakpoint_type": "on_error",
+                        "error": error_msg
+                    }
+            
+            if "context_length_exceeded" in error_msg:
+                if self.memory_manager:
+                    self.memory_manager.clear_session()
+                self.thread_id = str(uuid.uuid4())
+                yield {"type": "error", "content": "Conversation too long. Please try again."}
+            else:
+                yield {"type": "error", "content": error_msg}
