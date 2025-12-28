@@ -30,7 +30,11 @@ class MainWindow:
         self.chat_interface = None
         self.command_palette = None
         self.proactive_agent = None
+        self.toast_frame = None
+        self.current_mode = "general"
+        self.session_manager = None
         self._initialize_agent()
+        self._initialize_session_manager()
         self._create_window()
         self._create_menu()
         self._setup_keyboard_shortcuts()
@@ -52,6 +56,22 @@ class MainWindow:
             self.agent = None
             self.config_manager = None
             self.permission_manager = None
+    
+    def _initialize_session_manager(self):
+        """Initialize session management."""
+        try:
+            from ..core.session_manager import SessionManager
+            self.session_manager = SessionManager()
+            # Create or resume session
+            sessions = self.session_manager.list_sessions(limit=1)
+            if sessions:
+                # Resume most recent session
+                self.session_manager.load_session(sessions[0]['id'])
+            else:
+                self.session_manager.create_session()
+        except Exception as e:
+            print(f"Warning: Could not initialize session manager: {e}")
+            self.session_manager = None
 
     def _create_window(self):
         """Create the main window."""
@@ -84,6 +104,8 @@ class MainWindow:
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
         file_menu.add_command(label="New Chat", command=self._new_chat)
+        file_menu.add_command(label="Open Session...", command=self._show_sessions)
+        file_menu.add_command(label="Export Chat...", command=self._export_current_chat)
         file_menu.add_separator()
         file_menu.add_command(label="Settings", command=self._show_settings)
         file_menu.add_separator()
@@ -94,12 +116,23 @@ class MainWindow:
         menubar.add_cascade(label="View", menu=view_menu)
         view_menu.add_command(label="Chat", command=self._show_chat)
         view_menu.add_command(label="Dashboard", command=self._show_dashboard)
+        view_menu.add_command(label="Activity History", command=self._show_activity)
         view_menu.add_command(label="Terminal", command=self._show_terminal)
         view_menu.add_separator()
         view_menu.add_command(label="System Info", command=self._view_system_info)
         view_menu.add_command(label="Processes", command=self._view_processes)
         view_menu.add_command(label="Files", command=self._view_files)
         view_menu.add_command(label="Network", command=self._view_network)
+        
+        # Mode menu
+        mode_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Mode", menu=mode_menu)
+        mode_menu.add_command(label="🧠 General", command=lambda: self._set_mode("general"))
+        mode_menu.add_command(label="👨‍💻 Developer", command=lambda: self._set_mode("developer"))
+        mode_menu.add_command(label="🔧 SysAdmin", command=lambda: self._set_mode("sysadmin"))
+        mode_menu.add_command(label="🔒 Security", command=lambda: self._set_mode("security"))
+        mode_menu.add_command(label="⚡ Productivity", command=lambda: self._set_mode("productivity"))
+        mode_menu.add_command(label="🤖 Automation", command=lambda: self._set_mode("automation"))
         
         # Tools menu
         tools_menu = tk.Menu(menubar, tearoff=0)
@@ -244,7 +277,8 @@ class MainWindow:
                     on_command=self._on_palette_command
                 )
             
-            if self.command_palette.is_open:
+            # Check if palette popup exists
+            if self.command_palette.popup is not None:
                 self.command_palette.close()
             else:
                 self.command_palette.open()
@@ -283,6 +317,132 @@ class MainWindow:
         if USE_CUSTOMTKINTER:
             ctk.set_appearance_mode(theme)
         messagebox.showinfo("Theme", f"Theme set to: {theme.title()}")
+    
+    def _set_mode(self, mode: str):
+        """Set the agent mode."""
+        try:
+            from ..core.agent_modes import get_mode_manager, AgentMode
+            mm = get_mode_manager()
+            mode_enum = mm.get_mode_by_name(mode)
+            if mode_enum:
+                config = mm.set_mode(mode_enum)
+                self.current_mode = mode
+                messagebox.showinfo("Mode Changed", f"Switched to {config.icon} {config.display_name}\n\n{config.description}")
+                
+                # Update the sidebar if in chat view
+                if self.current_view == "chat":
+                    self._show_chat()
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not change mode: {e}")
+    
+    def _show_sessions(self):
+        """Show session management dialog."""
+        if not self.session_manager:
+            messagebox.showerror("Error", "Session manager not available")
+            return
+        
+        if USE_CUSTOMTKINTER:
+            session_window = ctk.CTkToplevel(self.root)
+            session_window.title("Chat Sessions")
+            session_window.geometry("500x400")
+            
+            # Title
+            ctk.CTkLabel(
+                session_window,
+                text="📁 Chat Sessions",
+                font=ctk.CTkFont(size=18, weight="bold")
+            ).pack(pady=15)
+            
+            # Sessions list
+            sessions_frame = ctk.CTkScrollableFrame(session_window, height=250)
+            sessions_frame.pack(fill="both", expand=True, padx=20, pady=10)
+            
+            sessions = self.session_manager.list_sessions(limit=20)
+            
+            if not sessions:
+                ctk.CTkLabel(sessions_frame, text="No sessions found").pack(pady=20)
+            else:
+                for session in sessions:
+                    row = ctk.CTkFrame(sessions_frame, fg_color="#2d2d2d", corner_radius=8)
+                    row.pack(fill="x", pady=3)
+                    
+                    # Session info
+                    info_frame = ctk.CTkFrame(row, fg_color="transparent")
+                    info_frame.pack(side="left", fill="x", expand=True, padx=10, pady=8)
+                    
+                    ctk.CTkLabel(
+                        info_frame,
+                        text=session['title'][:40],
+                        font=ctk.CTkFont(weight="bold"),
+                        anchor="w"
+                    ).pack(anchor="w")
+                    
+                    ctk.CTkLabel(
+                        info_frame,
+                        text=f"{session['message_count']} messages • {session['updated_at'][:10]}",
+                        font=ctk.CTkFont(size=11),
+                        text_color="#888",
+                        anchor="w"
+                    ).pack(anchor="w")
+                    
+                    # Load button
+                    ctk.CTkButton(
+                        row,
+                        text="Open",
+                        width=60,
+                        height=28,
+                        command=lambda s=session['id']: self._load_session(s, session_window)
+                    ).pack(side="right", padx=10)
+            
+            # New session button
+            ctk.CTkButton(
+                session_window,
+                text="+ New Session",
+                command=lambda: self._create_new_session(session_window),
+                width=150
+            ).pack(pady=15)
+        else:
+            messagebox.showinfo("Sessions", "Use sysagent sessions list in CLI")
+    
+    def _load_session(self, session_id: str, window):
+        """Load a session."""
+        try:
+            session = self.session_manager.load_session(session_id)
+            if session:
+                window.destroy()
+                self._show_chat()
+                # Display session messages
+                if self.chat_interface and session.messages:
+                    self.chat_interface.clear_chat()
+                    for msg in session.messages:
+                        from .chat import MessageType
+                        msg_type = MessageType.USER if msg.role == "user" else MessageType.ASSISTANT
+                        self.chat_interface._add_message(msg.content, msg_type)
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not load session: {e}")
+    
+    def _create_new_session(self, window):
+        """Create a new session."""
+        if self.session_manager:
+            self.session_manager.create_session()
+            window.destroy()
+            self._new_chat()
+    
+    def _export_current_chat(self):
+        """Export current chat session."""
+        if self.chat_interface:
+            self.chat_interface._export_chat()
+    
+    def _show_activity(self):
+        """Show activity dashboard."""
+        try:
+            from .activity_dashboard import ActivityDashboard
+            
+            if USE_CUSTOMTKINTER:
+                dashboard = ActivityDashboard()
+                dashboard.show_as_popup()
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open activity dashboard: {e}")
 
     def _new_chat(self):
         """Start a new chat session."""
@@ -323,7 +483,7 @@ class MainWindow:
             main_container.pack(fill="both", expand=True)
             
             # Sidebar
-            sidebar = ctk.CTkFrame(main_container, width=200, corner_radius=0)
+            sidebar = ctk.CTkFrame(main_container, width=220, corner_radius=0, fg_color="#1a1a2e")
             sidebar.pack(side="left", fill="y")
             sidebar.pack_propagate(False)
             
@@ -333,40 +493,109 @@ class MainWindow:
                 text="🧠 SysAgent",
                 font=ctk.CTkFont(size=20, weight="bold")
             )
-            logo.pack(pady=30)
+            logo.pack(pady=(25, 5))
+            
+            # Current mode indicator
+            try:
+                from ..core.agent_modes import get_mode_manager
+                mm = get_mode_manager()
+                config = mm.get_config()
+                mode_label = ctk.CTkLabel(
+                    sidebar,
+                    text=f"{config.icon} {config.display_name}",
+                    font=ctk.CTkFont(size=11),
+                    text_color=config.color
+                )
+                mode_label.pack(pady=(0, 20))
+            except Exception:
+                pass
+            
+            # Navigation section
+            nav_label = ctk.CTkLabel(
+                sidebar,
+                text="NAVIGATION",
+                font=ctk.CTkFont(size=10),
+                text_color="#666"
+            )
+            nav_label.pack(anchor="w", padx=15, pady=(10, 5))
             
             # Navigation buttons
             nav_buttons = [
-                ("💬 Chat", self._show_chat),
-                ("🏠 Dashboard", self._show_dashboard),
+                ("💬 Chat", self._show_chat, self.current_view == "chat"),
+                ("🏠 Dashboard", self._show_dashboard, self.current_view == "dashboard"),
+                ("📊 Activity", self._show_activity, False),
+                ("📁 Sessions", self._show_sessions, False),
+            ]
+            
+            for text, command, is_active in nav_buttons:
+                btn = ctk.CTkButton(
+                    sidebar,
+                    text=text,
+                    command=command,
+                    width=190,
+                    height=35,
+                    anchor="w",
+                    fg_color="#3b82f6" if is_active else "transparent",
+                    hover_color="#2563eb" if is_active else "#2d2d4a"
+                )
+                btn.pack(pady=2, padx=10)
+            
+            # Tools section
+            tools_label = ctk.CTkLabel(
+                sidebar,
+                text="QUICK TOOLS",
+                font=ctk.CTkFont(size=10),
+                text_color="#666"
+            )
+            tools_label.pack(anchor="w", padx=15, pady=(20, 5))
+            
+            tools_buttons = [
                 ("💻 System Info", self._view_system_info),
                 ("📊 Processes", self._view_processes),
-                ("📁 Files", self._view_files),
                 ("🌐 Network", self._view_network),
                 ("🖥️ Terminal", self._show_terminal),
                 ("⚙️ Settings", self._show_settings),
             ]
             
-            for text, command in nav_buttons:
+            for text, command in tools_buttons:
                 btn = ctk.CTkButton(
                     sidebar,
                     text=text,
                     command=command,
-                    width=180,
-                    height=35,
-                    anchor="w"
+                    width=190,
+                    height=32,
+                    anchor="w",
+                    fg_color="transparent",
+                    hover_color="#2d2d4a",
+                    font=ctk.CTkFont(size=12)
                 )
-                btn.pack(pady=3, padx=10)
+                btn.pack(pady=1, padx=10)
             
             # Quick status at bottom
-            status_frame = ctk.CTkFrame(sidebar)
+            status_frame = ctk.CTkFrame(sidebar, fg_color="#16162a")
             status_frame.pack(side="bottom", fill="x", padx=10, pady=10)
             
             if PSUTIL_AVAILABLE:
                 cpu = psutil.cpu_percent()
                 mem = psutil.virtual_memory().percent
-                ctk.CTkLabel(status_frame, text=f"CPU: {cpu}%", font=ctk.CTkFont(size=10)).pack()
-                ctk.CTkLabel(status_frame, text=f"RAM: {mem}%", font=ctk.CTkFont(size=10)).pack()
+                
+                # CPU bar
+                cpu_frame = ctk.CTkFrame(status_frame, fg_color="transparent")
+                cpu_frame.pack(fill="x", padx=10, pady=5)
+                ctk.CTkLabel(cpu_frame, text="CPU", font=ctk.CTkFont(size=10), width=35).pack(side="left")
+                cpu_bar = ctk.CTkProgressBar(cpu_frame, width=100, height=8)
+                cpu_bar.set(cpu / 100)
+                cpu_bar.pack(side="left", padx=5)
+                ctk.CTkLabel(cpu_frame, text=f"{cpu:.0f}%", font=ctk.CTkFont(size=10), width=35).pack(side="left")
+                
+                # RAM bar
+                mem_frame = ctk.CTkFrame(status_frame, fg_color="transparent")
+                mem_frame.pack(fill="x", padx=10, pady=5)
+                ctk.CTkLabel(mem_frame, text="RAM", font=ctk.CTkFont(size=10), width=35).pack(side="left")
+                mem_bar = ctk.CTkProgressBar(mem_frame, width=100, height=8)
+                mem_bar.set(mem / 100)
+                mem_bar.pack(side="left", padx=5)
+                ctk.CTkLabel(mem_frame, text=f"{mem:.0f}%", font=ctk.CTkFont(size=10), width=35).pack(side="left")
             
             # Chat area
             chat_container = ctk.CTkFrame(main_container)
@@ -407,65 +636,117 @@ class MainWindow:
     def _create_quick_actions_bar(self, parent):
         """Create a quick actions bar for common commands."""
         if USE_CUSTOMTKINTER:
-            bar = ctk.CTkFrame(parent, height=50, fg_color="#2d2d2d")
+            bar = ctk.CTkFrame(parent, height=55, fg_color="#1e1e2e")
             bar.pack(fill="x", padx=0, pady=0)
             bar.pack_propagate(False)
             
             # Left side - Command palette button
             left_frame = ctk.CTkFrame(bar, fg_color="transparent")
-            left_frame.pack(side="left", padx=10)
+            left_frame.pack(side="left", padx=15, pady=10)
             
             palette_btn = ctk.CTkButton(
                 left_frame,
-                text="⌘K Command Palette",
+                text="⌘K Search",
                 command=self._toggle_command_palette,
-                width=160,
-                height=30,
-                fg_color="#3d3d3d",
-                hover_color="#4d4d4d",
-                font=ctk.CTkFont(size=12)
+                width=120,
+                height=32,
+                fg_color="#3d3d4d",
+                hover_color="#4d4d5d",
+                font=ctk.CTkFont(size=12),
+                corner_radius=8
             )
             palette_btn.pack(side="left", padx=5)
             
-            # Center - Quick action buttons
+            # Center - Mode-specific quick actions
             center_frame = ctk.CTkFrame(bar, fg_color="transparent")
-            center_frame.pack(side="left", padx=20)
+            center_frame.pack(side="left", fill="x", expand=True, padx=10)
             
-            quick_actions = [
-                ("🏥 Health", "Check system health"),
-                ("📊 Status", "Show system status"),
-                ("🔍 Search", "Search for files named "),
-                ("⚡ Insights", "Give me quick insights"),
-            ]
+            # Get mode-specific actions
+            quick_actions = self._get_mode_quick_actions()
             
-            for text, action in quick_actions:
+            for text, action in quick_actions[:5]:
                 btn = ctk.CTkButton(
                     center_frame,
                     text=text,
                     command=lambda a=action: self._quick_action(a),
-                    width=90,
-                    height=28,
-                    fg_color="#3d3d3d",
-                    hover_color="#4d4d4d",
-                    font=ctk.CTkFont(size=11)
+                    height=30,
+                    fg_color="transparent",
+                    hover_color="#3d3d4d",
+                    border_width=1,
+                    border_color="#3d3d4d",
+                    font=ctk.CTkFont(size=11),
+                    corner_radius=6
                 )
                 btn.pack(side="left", padx=3)
             
-            # Right side - Workflow dropdown
+            # Right side - Mode selector and workflow
             right_frame = ctk.CTkFrame(bar, fg_color="transparent")
-            right_frame.pack(side="right", padx=10)
+            right_frame.pack(side="right", padx=15, pady=10)
+            
+            # Mode dropdown
+            mode_btn = ctk.CTkButton(
+                right_frame,
+                text=f"🎯 Mode",
+                command=self._show_mode_menu,
+                width=80,
+                height=30,
+                fg_color="#3d3d4d",
+                hover_color="#4d4d5d",
+                font=ctk.CTkFont(size=11),
+                corner_radius=6
+            )
+            mode_btn.pack(side="left", padx=3)
             
             workflow_btn = ctk.CTkButton(
                 right_frame,
                 text="▶ Workflows",
                 command=self._show_workflow_menu,
                 width=100,
-                height=28,
-                fg_color="#4a9eff",
-                hover_color="#3a8eef",
-                font=ctk.CTkFont(size=11)
+                height=30,
+                fg_color="#3b82f6",
+                hover_color="#2563eb",
+                font=ctk.CTkFont(size=11),
+                corner_radius=6
             )
-            workflow_btn.pack(side="right", padx=5)
+            workflow_btn.pack(side="left", padx=3)
+    
+    def _get_mode_quick_actions(self):
+        """Get quick actions based on current mode."""
+        try:
+            from ..core.agent_modes import get_mode_manager
+            mm = get_mode_manager()
+            config = mm.get_config()
+            return [(a['label'], a['command']) for a in config.quick_actions[:5]]
+        except Exception:
+            # Default actions
+            return [
+                ("🏥 Health", "Check system health"),
+                ("📊 Status", "Show system status"),
+                ("🔍 Search", "Search for files"),
+                ("⚡ Insights", "Quick insights"),
+            ]
+    
+    def _show_mode_menu(self):
+        """Show mode selection menu."""
+        menu = tk.Menu(self.root, tearoff=0)
+        
+        modes = [
+            ("🧠 General", "general"),
+            ("👨‍💻 Developer", "developer"),
+            ("🔧 SysAdmin", "sysadmin"),
+            ("🔒 Security", "security"),
+            ("⚡ Productivity", "productivity"),
+            ("🤖 Automation", "automation"),
+        ]
+        
+        for label, mode in modes:
+            check = "✓ " if mode == self.current_mode else "   "
+            menu.add_command(label=f"{check}{label}", command=lambda m=mode: self._set_mode(m))
+        
+        try:
+            menu.tk_popup(self.root.winfo_pointerx(), self.root.winfo_pointery())
+        finally:
+            menu.grab_release()
 
     def _quick_action(self, action: str):
         """Execute a quick action."""
@@ -474,8 +755,10 @@ class MainWindow:
                 # User needs to complete the command
                 self.chat_interface._set_input_text(action)
                 try:
-                    self.chat_interface.input_field.focus_set()
-                except:
+                    # Focus the input field
+                    if hasattr(self.chat_interface, 'input_field'):
+                        self.chat_interface.input_field.focus_set()
+                except Exception:
                     pass
             else:
                 # Send directly
@@ -616,15 +899,10 @@ class MainWindow:
     def _show_tool_status(self, tool_name: str):
         """Show tool execution status."""
         try:
-            if hasattr(self.chat_interface, 'status_label'):
-                self.chat_interface.status_label.configure(text=f"● Using {tool_name}...")
+            if hasattr(self.chat_interface, 'status_text'):
+                self.chat_interface.status_text.configure(text=f"Using {tool_name}...")
         except Exception:
             pass
-        else:
-            self.chat_interface.add_message(
-                "Agent not available. Please check your configuration and API keys in Settings.",
-                is_user=False
-            )
 
     def _format_data(self, data: dict, max_items: int = 10) -> str:
         """Format data dictionary for display."""
