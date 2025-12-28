@@ -575,8 +575,75 @@ Type your message below or use a quick action to get started!"""
             )
             msg_label.pack(anchor="w", padx=12, pady=(2, 10))
             
-            # Copy button for assistant messages
+            # Action buttons frame
+            actions_frame = ctk.CTkFrame(bubble, fg_color="transparent")
+            actions_frame.pack(fill="x", padx=10, pady=(0, 8))
+            
+            # Copy button
+            copy_btn = ctk.CTkButton(
+                actions_frame,
+                text="📋 Copy",
+                width=55,
+                height=22,
+                corner_radius=5,
+                font=ctk.CTkFont(size=10),
+                fg_color="transparent",
+                hover_color=("gray70", "gray40"),
+                command=lambda c=content: self._copy_to_clipboard(c)
+            )
+            copy_btn.pack(side="left", padx=2)
+            
+            # Save to file button
+            save_btn = ctk.CTkButton(
+                actions_frame,
+                text="💾 Save",
+                width=55,
+                height=22,
+                corner_radius=5,
+                font=ctk.CTkFont(size=10),
+                fg_color="transparent",
+                hover_color=("gray70", "gray40"),
+                command=lambda c=content: self._save_message_to_file(c)
+            )
+            save_btn.pack(side="left", padx=2)
+            
+            # More actions for assistant messages
             if not is_user:
+                # Retry button
+                retry_btn = ctk.CTkButton(
+                    actions_frame,
+                    text="🔄 Retry",
+                    width=55,
+                    height=22,
+                    corner_radius=5,
+                    font=ctk.CTkFont(size=10),
+                    fg_color="transparent",
+                    hover_color=("gray70", "gray40"),
+                    command=lambda: self._retry_last_message()
+                )
+                retry_btn.pack(side="left", padx=2)
+                
+                # Open in app button (for code/data)
+                if message_type in ["code", "text"] or "```" in content:
+                    open_btn = ctk.CTkButton(
+                        actions_frame,
+                        text="📝 Open",
+                        width=55,
+                        height=22,
+                        corner_radius=5,
+                        font=ctk.CTkFont(size=10),
+                        fg_color="transparent",
+                        hover_color=("gray70", "gray40"),
+                        command=lambda c=content: self._open_in_editor(c)
+                    )
+                    open_btn.pack(side="left", padx=2)
+            
+            # Bind right-click context menu
+            self._bind_context_menu(bubble, content, is_user)
+            self._bind_context_menu(msg_label, content, is_user)
+            
+            # Legacy copy button removed - replaced with action buttons above
+            if False:  # Disabled
                 copy_btn = ctk.CTkButton(
                     bubble,
                     text="📋 Copy",
@@ -632,6 +699,101 @@ Type your message below or use a quick action to get started!"""
                 self.parent.after(1500, lambda: self.status_label.configure(text="● Ready", text_color="#00d26a"))
         except Exception:
             pass
+
+    def _save_message_to_file(self, content: str):
+        """Save a message to a file."""
+        from tkinter import filedialog
+        
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[
+                ("Text files", "*.txt"),
+                ("Markdown", "*.md"),
+                ("Python", "*.py"),
+                ("JSON", "*.json"),
+                ("All files", "*.*")
+            ]
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, "w") as f:
+                    f.write(content)
+                
+                if USE_CUSTOMTKINTER:
+                    self.status_label.configure(text="● Saved!", text_color="#00d26a")
+                    self.parent.after(1500, lambda: self.status_label.configure(text="● Ready", text_color="#00d26a"))
+            except Exception as e:
+                from tkinter import messagebox
+                messagebox.showerror("Save Error", f"Failed to save: {e}")
+
+    def _retry_last_message(self):
+        """Retry the last user message."""
+        if self.command_history:
+            last_message = self.command_history[-1]
+            self._quick_send(last_message)
+
+    def _open_in_editor(self, content: str):
+        """Open content in default text editor."""
+        import tempfile
+        import subprocess
+        import os
+        
+        try:
+            # Create temp file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                f.write(content)
+                temp_path = f.name
+            
+            # Open in default editor
+            from ..utils.platform import detect_platform, Platform
+            platform = detect_platform()
+            
+            if platform == Platform.MACOS:
+                subprocess.Popen(["open", temp_path])
+            elif platform == Platform.WINDOWS:
+                os.startfile(temp_path)
+            else:  # Linux
+                # Try common editors
+                for editor in ["xdg-open", "gedit", "kate", "nano", "vim"]:
+                    try:
+                        subprocess.Popen([editor, temp_path])
+                        break
+                    except FileNotFoundError:
+                        continue
+            
+            if USE_CUSTOMTKINTER:
+                self.status_label.configure(text="● Opened!", text_color="#00d26a")
+                self.parent.after(1500, lambda: self.status_label.configure(text="● Ready", text_color="#00d26a"))
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Failed to open editor: {e}")
+
+    def _bind_context_menu(self, widget, content: str, is_user: bool):
+        """Bind right-click context menu to a widget."""
+        menu = tk.Menu(widget, tearoff=0)
+        
+        menu.add_command(label="📋 Copy", command=lambda: self._copy_to_clipboard(content))
+        menu.add_command(label="💾 Save to File", command=lambda: self._save_message_to_file(content))
+        menu.add_command(label="📝 Open in Editor", command=lambda: self._open_in_editor(content))
+        menu.add_separator()
+        
+        if not is_user:
+            menu.add_command(label="🔄 Retry Last", command=self._retry_last_message)
+            menu.add_separator()
+        
+        menu.add_command(label="📤 Export Chat", command=self._export_chat)
+        menu.add_command(label="🗑️ Clear Chat", command=self.clear_chat)
+        
+        def show_menu(event):
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+        
+        widget.bind("<Button-3>", show_menu)  # Right-click
+        if USE_CUSTOMTKINTER:
+            widget.bind("<Button-2>", show_menu)  # Middle-click on Mac
     
     def _export_chat(self):
         """Export chat history."""

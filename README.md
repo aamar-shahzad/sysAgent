@@ -14,7 +14,7 @@
 - Support for OpenAI, Ollama, and local models
 - Context-aware responses and suggestions
 
-### 🛠️ Comprehensive System Tools (18 Tools)
+### 🛠️ Comprehensive System Tools (20 Tools)
 - **FileTool**: File operations, cleanup, organization
 - **SystemInfoTool**: Real-time system metrics and monitoring
 - **ProcessTool**: Process management and control
@@ -33,6 +33,8 @@
 - **CodeGenerationTool**: Code generation and execution
 - **OSIntelligenceTool**: OS-specific optimizations
 - **LowLevelOSTool**: Low-level OS operations
+- **DocumentTool**: Create/edit documents, notes, and text files
+- **SpreadsheetTool**: Create Excel/CSV files, data entry forms, templates
 
 ### 🖥️ GUI Features
 - **Chat Interface**: Natural language interaction with SysAgent in a beautiful GUI
@@ -118,6 +120,17 @@ sysagent "what's my public IP address?"
 sysagent "open my code editor"
 sysagent "close all browser windows"
 sysagent "focus on my terminal"
+
+# Documents and notes
+sysagent "create a note about today's meeting"
+sysagent "make a todo list for the project"
+sysagent "create meeting notes template"
+
+# Spreadsheets and data
+sysagent "create an Excel sheet for expense tracking"
+sysagent "make a data entry form with name, email, phone"
+sysagent "create a budget spreadsheet"
+sysagent "create an inventory list template"
 ```
 
 ### Advanced Features

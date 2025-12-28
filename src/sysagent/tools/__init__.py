@@ -21,6 +21,8 @@ from .voice_tool import VoiceTool
 from .auth_tool import AuthTool
 from .scheduler_tool import SchedulerTool
 from .service_tool import ServiceTool
+from .document_tool import DocumentTool
+from .spreadsheet_tool import SpreadsheetTool
 
 __all__ = [
     "BaseTool",
@@ -46,4 +48,6 @@ __all__ = [
     "AuthTool",
     "SchedulerTool",
     "ServiceTool",
+    "DocumentTool",
+    "SpreadsheetTool",
 ] 
