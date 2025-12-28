@@ -58,22 +58,42 @@ class LangGraphAgent:
         self.agent = self._create_react_agent()
 
     def _initialize_llm(self):
-        """Initialize the OpenAI LLM."""
+        """Initialize the OpenAI LLM with appropriate model for context size."""
         try:
             # Load API key from environment or config
             api_key = self._load_api_key()
             if not api_key:
                 api_key = self._prompt_for_openai_key()
             
+            # Get model from config or use default with large context
+            model = self._get_model_name()
+            
             from langchain_openai import ChatOpenAI
             return ChatOpenAI(
-                model="gpt-4",
+                model=model,
                 temperature=0,
                 api_key=api_key
             )
         except Exception as e:
             print(f"Failed to initialize LLM: {e}")
             return None
+
+    def _get_model_name(self) -> str:
+        """Get the model name from config or use a sensible default."""
+        # Check config first
+        if hasattr(self.config, 'agent') and hasattr(self.config.agent, 'model'):
+            configured_model = self.config.agent.model
+            if configured_model:
+                return configured_model
+        
+        # Check environment
+        env_model = os.environ.get("OPENAI_MODEL") or os.environ.get("SYSAGENT_MODEL")
+        if env_model:
+            return env_model
+        
+        # Default to gpt-4o-mini which has 128k context and is cost-effective
+        # Fallback order: gpt-4o-mini > gpt-4-turbo > gpt-4
+        return "gpt-4o-mini"
 
     def _load_api_key(self) -> Optional[str]:
         """Load OpenAI API key from various sources."""
