@@ -265,10 +265,8 @@ class MainWindow:
     def _send_palette_command(self, command: str):
         """Send command from palette to chat."""
         if self.chat_interface:
-            # Add the command to the input and send
-            self.chat_interface.input_field.delete(0, "end")
-            self.chat_interface.input_field.insert(0, command)
-            self.chat_interface._send_message()
+            # Send directly using the helper method
+            self.chat_interface._send_message_direct(command)
 
     def _quick_insights(self):
         """Show quick system insights."""
@@ -472,12 +470,16 @@ class MainWindow:
     def _quick_action(self, action: str):
         """Execute a quick action."""
         if self.chat_interface:
-            self.chat_interface.input_field.delete(0, "end")
-            self.chat_interface.input_field.insert(0, action)
-            if not action.endswith(" "):
-                self.chat_interface._send_message()
+            if action.endswith(" "):
+                # User needs to complete the command
+                self.chat_interface._set_input_text(action)
+                try:
+                    self.chat_interface.input_field.focus_set()
+                except:
+                    pass
             else:
-                self.chat_interface.input_field.focus_set()
+                # Send directly
+                self.chat_interface._send_message_direct(action)
 
     def _show_workflow_menu(self):
         """Show workflow menu."""
