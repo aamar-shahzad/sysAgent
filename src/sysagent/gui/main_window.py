@@ -1,10 +1,14 @@
 """
-Main GUI Window for SysAgent - Combines Dashboard and Settings.
+Main GUI Window for SysAgent - Full-featured intelligent assistant.
+Includes all smart features: learning, monitoring, snippets, shortcuts.
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
-from typing import Optional
+from tkinter import ttk, messagebox, filedialog
+from typing import Optional, List, Dict, Any
+import threading
+import time
+from datetime import datetime
 
 try:
     import customtkinter as ctk
@@ -18,13 +22,56 @@ try:
 except ImportError:
     PSUTIL_AVAILABLE = False
 
+# Import smart features
+try:
+    from ..core.smart_learning import get_learning_system
+    LEARNING_AVAILABLE = True
+except ImportError:
+    LEARNING_AVAILABLE = False
+
+try:
+    from ..core.proactive_monitor import get_monitor, start_monitoring
+    MONITOR_AVAILABLE = True
+except ImportError:
+    MONITOR_AVAILABLE = False
+
+try:
+    from ..core.smart_clipboard import get_smart_clipboard
+    CLIPBOARD_AVAILABLE = True
+except ImportError:
+    CLIPBOARD_AVAILABLE = False
+
+try:
+    from ..core.deep_agent import DeepAgent, create_deep_agent
+    DEEP_AGENT_AVAILABLE = True
+except ImportError:
+    DEEP_AGENT_AVAILABLE = False
+
+
+# Theme colors
+COLORS = {
+    "bg": "#0a0a0f",
+    "bg_secondary": "#12121a",
+    "bg_tertiary": "#1a1a24",
+    "sidebar": "#0d0d14",
+    "border": "#2a2a35",
+    "text": "#ffffff",
+    "text_secondary": "#9898a8",
+    "text_muted": "#5a5a6a",
+    "accent": "#4a6cf7",
+    "accent_hover": "#5a7cff",
+    "success": "#22c55e",
+    "warning": "#f59e0b",
+    "error": "#ef4444",
+}
+
 
 class MainWindow:
-    """Main application window combining dashboard, chat, and settings."""
+    """Main application window with all smart features."""
 
     def __init__(self):
         self.root = None
-        self.current_view = "chat"  # Default to chat view
+        self.current_view = "chat"
         self.current_theme = "dark"
         self.agent = None
         self.chat_interface = None
@@ -33,16 +80,18 @@ class MainWindow:
         self.toast_frame = None
         self.current_mode = "general"
         self.session_manager = None
+        self.learning = None
+        self.monitor = None
+        
         self._initialize_agent()
-        self._initialize_session_manager()
+        self._initialize_smart_features()
         self._create_window()
-        self._create_menu()
+        self._create_layout()
         self._setup_keyboard_shortcuts()
-        self._setup_proactive_agent()
-        self._create_content()
+        self._start_background_tasks()
 
     def _initialize_agent(self):
-        """Initialize the LangGraph agent."""
+        """Initialize the LangGraph agent and Deep Agent wrapper."""
         try:
             from ..core.config import ConfigManager
             from ..core.permissions import PermissionManager
@@ -51,27 +100,46 @@ class MainWindow:
             self.config_manager = ConfigManager()
             self.permission_manager = PermissionManager(self.config_manager)
             self.agent = LangGraphAgent(self.config_manager, self.permission_manager)
+            
+            # Create Deep Agent wrapper for advanced features
+            if DEEP_AGENT_AVAILABLE and self.agent:
+                self.deep_agent = create_deep_agent(self.agent)
+            else:
+                self.deep_agent = None
         except Exception as e:
             print(f"Warning: Could not initialize agent: {e}")
             self.agent = None
+            self.deep_agent = None
             self.config_manager = None
             self.permission_manager = None
     
-    def _initialize_session_manager(self):
-        """Initialize session management."""
+    def _initialize_smart_features(self):
+        """Initialize all smart features."""
+        # Session Manager
         try:
             from ..core.session_manager import SessionManager
             self.session_manager = SessionManager()
-            # Create or resume session
             sessions = self.session_manager.list_sessions(limit=1)
             if sessions:
-                # Resume most recent session
                 self.session_manager.load_session(sessions[0]['id'])
             else:
                 self.session_manager.create_session()
-        except Exception as e:
-            print(f"Warning: Could not initialize session manager: {e}")
+        except Exception:
             self.session_manager = None
+        
+        # Learning System
+        if LEARNING_AVAILABLE:
+            try:
+                self.learning = get_learning_system()
+            except Exception:
+                self.learning = None
+        
+        # Monitor
+        if MONITOR_AVAILABLE:
+            try:
+                self.monitor = get_monitor()
+            except Exception:
+                self.monitor = None
 
     def _create_window(self):
         """Create the main window."""
@@ -79,919 +147,1430 @@ class MainWindow:
             ctk.set_appearance_mode(self.current_theme)
             ctk.set_default_color_theme("blue")
             self.root = ctk.CTk()
+            self.root.configure(fg_color=COLORS["bg"])
         else:
             self.root = tk.Tk()
         
-        self.root.title("SysAgent - Intelligent System Assistant")
+        self.root.title("SysAgent")
         self.root.geometry("1400x900")
-        self.root.minsize(1200, 800)
-        
-        # Set icon if available
-        try:
-            # self.root.iconbitmap("path/to/icon.ico")
-            pass
-        except:
-            pass
+        self.root.minsize(1100, 700)
         
         return self.root
 
-    def _create_menu(self):
-        """Create the menu bar."""
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
-        
-        # File menu
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="New Chat", command=self._new_chat)
-        file_menu.add_command(label="Open Session...", command=self._show_sessions)
-        file_menu.add_command(label="Export Chat...", command=self._export_current_chat)
-        file_menu.add_separator()
-        file_menu.add_command(label="Settings", command=self._show_settings)
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self._on_exit)
-        
-        # View menu
-        view_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="View", menu=view_menu)
-        view_menu.add_command(label="Chat", command=self._show_chat)
-        view_menu.add_command(label="Dashboard", command=self._show_dashboard)
-        view_menu.add_command(label="Activity History", command=self._show_activity)
-        view_menu.add_command(label="Terminal", command=self._show_terminal)
-        view_menu.add_separator()
-        view_menu.add_command(label="System Info", command=self._view_system_info)
-        view_menu.add_command(label="Processes", command=self._view_processes)
-        view_menu.add_command(label="Files", command=self._view_files)
-        view_menu.add_command(label="Network", command=self._view_network)
-        
-        # Mode menu
-        mode_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Mode", menu=mode_menu)
-        mode_menu.add_command(label="🧠 General", command=lambda: self._set_mode("general"))
-        mode_menu.add_command(label="👨‍💻 Developer", command=lambda: self._set_mode("developer"))
-        mode_menu.add_command(label="🔧 SysAdmin", command=lambda: self._set_mode("sysadmin"))
-        mode_menu.add_command(label="🔒 Security", command=lambda: self._set_mode("security"))
-        mode_menu.add_command(label="⚡ Productivity", command=lambda: self._set_mode("productivity"))
-        mode_menu.add_command(label="🤖 Automation", command=lambda: self._set_mode("automation"))
-        
-        # Tools menu
-        tools_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Tools", menu=tools_menu)
-        tools_menu.add_command(label="Clean Temp Files", command=self._clean_temp)
-        tools_menu.add_command(label="Organize Downloads", command=self._organize_downloads)
-        tools_menu.add_command(label="Check Internet", command=self._check_internet)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Run CLI Command", command=self._run_cli_command)
-        tools_menu.add_command(label="Plugin Manager", command=self._show_plugins)
-        
-        # Theme menu
-        theme_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Theme", menu=theme_menu)
-        theme_menu.add_command(label="Dark Mode", command=lambda: self._set_theme("dark"))
-        theme_menu.add_command(label="Light Mode", command=lambda: self._set_theme("light"))
-        theme_menu.add_command(label="System", command=lambda: self._set_theme("system"))
-        
-        # Help menu
-        help_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Help", menu=help_menu)
-        help_menu.add_command(label="Documentation", command=self._show_docs)
-        help_menu.add_command(label="Keyboard Shortcuts", command=self._show_shortcuts)
-        help_menu.add_separator()
-        help_menu.add_command(label="About", command=self._show_about)
-
-    def _setup_keyboard_shortcuts(self):
-        """Setup global keyboard shortcuts."""
-        # Command palette: Ctrl+K or Cmd+K
-        self.root.bind("<Control-k>", lambda e: self._toggle_command_palette())
-        self.root.bind("<Command-k>", lambda e: self._toggle_command_palette())
-        
-        # Quick actions
-        self.root.bind("<Control-n>", lambda e: self._new_chat())
-        self.root.bind("<Control-d>", lambda e: self._show_dashboard())
-        self.root.bind("<Control-s>", lambda e: self._show_settings())
-        self.root.bind("<Control-t>", lambda e: self._show_terminal())
-        self.root.bind("<Control-q>", lambda e: self._on_exit())
-        
-        # Quick insights
-        self.root.bind("<Control-i>", lambda e: self._quick_insights())
-
-    def _setup_proactive_agent(self):
-        """Setup the proactive agent for intelligent suggestions."""
-        try:
-            from .proactive_agent import ProactiveAgent
-            self.proactive_agent = ProactiveAgent(callback=self._on_proactive_suggestion)
-            self.proactive_agent.start()
-        except Exception as e:
-            print(f"Warning: Could not initialize proactive agent: {e}")
-            self.proactive_agent = None
-
-    def _on_proactive_suggestion(self, suggestion):
-        """Handle a proactive suggestion from the agent."""
-        if not suggestion or suggestion.dismissed:
+    def _create_layout(self):
+        """Create the main layout."""
+        if not USE_CUSTOMTKINTER:
+            self._create_simple_layout()
             return
         
-        # Show suggestion in a non-intrusive way
+        # Main container
+        self.main_container = ctk.CTkFrame(self.root, fg_color=COLORS["bg"])
+        self.main_container.pack(fill="both", expand=True)
+        
+        # Create sidebar
+        self._create_sidebar()
+        
+        # Create main content area
+        self.content_area = ctk.CTkFrame(self.main_container, fg_color=COLORS["bg"])
+        self.content_area.pack(side="right", fill="both", expand=True)
+        
+        # Create top bar
+        self._create_top_bar()
+        
+        # Create content frame
+        self.content_frame = ctk.CTkFrame(self.content_area, fg_color=COLORS["bg"])
+        self.content_frame.pack(fill="both", expand=True)
+        
+        # Show chat by default
+        self._show_chat()
+    
+    def _create_simple_layout(self):
+        """Create simple layout for non-customtkinter."""
+        self.content_frame = ttk.Frame(self.root)
+        self.content_frame.pack(fill="both", expand=True)
+        self._show_chat()
+
+    def _create_sidebar(self):
+        """Create the sidebar with all features."""
+        sidebar = ctk.CTkFrame(
+            self.main_container,
+            width=240,
+            corner_radius=0,
+            fg_color=COLORS["sidebar"]
+        )
+        sidebar.pack(side="left", fill="y")
+        sidebar.pack_propagate(False)
+        
+        # Logo
+        logo_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
+        logo_frame.pack(fill="x", padx=16, pady=(20, 10))
+        
+        ctk.CTkLabel(
+            logo_frame,
+            text="🧠 SysAgent",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color=COLORS["text"]
+        ).pack(anchor="w")
+        
+        # Mode indicator
+        self._create_mode_indicator(sidebar)
+        
+        # Navigation
+        self._create_nav_section(sidebar, "NAVIGATION", [
+            ("💬", "Chat", self._show_chat, "chat"),
+            ("📊", "Dashboard", self._show_dashboard, "dashboard"),
+            ("📈", "Activity", self._show_activity, "activity"),
+            ("⚙️", "Settings", self._show_settings, "settings"),
+        ])
+        
+        # Smart Features
+        self._create_nav_section(sidebar, "SMART FEATURES", [
+            ("⚡", "Suggestions", self._show_suggestions, None),
+            ("📌", "Snippets", self._show_snippets, None),
+            ("⌨️", "Shortcuts", self._show_shortcuts, None),
+            ("📜", "History", self._show_history_panel, None),
+        ])
+        
+        # Quick Tools
+        self._create_nav_section(sidebar, "QUICK TOOLS", [
+            ("🏥", "Health Check", lambda: self._quick_action("Run health check"), None),
+            ("💻", "System Info", lambda: self._quick_action("Show system info"), None),
+            ("🔍", "Search Files", lambda: self._quick_action("Search for files"), None),
+            ("🖥️", "Terminal", self._show_terminal, "terminal"),
+        ])
+        
+        # Status panel at bottom
+        self._create_status_panel(sidebar)
+    
+    def _create_mode_indicator(self, parent):
+        """Create mode indicator."""
+        mode_frame = ctk.CTkFrame(parent, fg_color=COLORS["bg_tertiary"], corner_radius=8)
+        mode_frame.pack(fill="x", padx=12, pady=(0, 15))
+        
+        inner = ctk.CTkFrame(mode_frame, fg_color="transparent")
+        inner.pack(fill="x", padx=12, pady=10)
+        
+        # Get current mode
+        mode_icon = "🧠"
+        mode_name = "General"
+        mode_color = COLORS["accent"]
+        
         try:
-            self._show_suggestion_toast(suggestion)
+            from ..core.agent_modes import get_mode_manager
+            mm = get_mode_manager()
+            config = mm.get_config()
+            mode_icon = config.icon
+            mode_name = config.display_name
+            mode_color = config.color
+        except Exception:
+            pass
+        
+        ctk.CTkLabel(
+            inner,
+            text=f"{mode_icon} {mode_name}",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=mode_color
+        ).pack(side="left")
+        
+        ctk.CTkButton(
+            inner,
+            text="Change",
+            width=55,
+            height=22,
+            corner_radius=4,
+            font=ctk.CTkFont(size=10),
+            fg_color="transparent",
+            hover_color=COLORS["bg_secondary"],
+            text_color=COLORS["text_muted"],
+            command=self._show_mode_selector
+        ).pack(side="right")
+    
+    def _create_nav_section(self, parent, title: str, items: list):
+        """Create a navigation section."""
+        # Section title
+        ctk.CTkLabel(
+            parent,
+            text=title,
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color=COLORS["text_muted"]
+        ).pack(anchor="w", padx=16, pady=(15, 8))
+        
+        # Items
+        for icon, label, command, view_id in items:
+            is_active = view_id and view_id == self.current_view
+            
+            btn = ctk.CTkButton(
+                parent,
+                text=f"  {icon}  {label}",
+                anchor="w",
+                height=36,
+                corner_radius=8,
+                font=ctk.CTkFont(size=13),
+                fg_color=COLORS["accent"] if is_active else "transparent",
+                hover_color=COLORS["accent_hover"] if is_active else COLORS["bg_tertiary"],
+                text_color=COLORS["text"],
+                command=command
+            )
+            btn.pack(fill="x", padx=8, pady=2)
+    
+    def _create_status_panel(self, parent):
+        """Create status panel at bottom of sidebar."""
+        status_frame = ctk.CTkFrame(parent, fg_color=COLORS["bg_tertiary"], corner_radius=8)
+        status_frame.pack(side="bottom", fill="x", padx=12, pady=12)
+        
+        inner = ctk.CTkFrame(status_frame, fg_color="transparent")
+        inner.pack(fill="x", padx=12, pady=10)
+        
+        # System stats
+        if PSUTIL_AVAILABLE:
+            try:
+                cpu = psutil.cpu_percent(interval=0.1)
+                mem = psutil.virtual_memory().percent
+                
+                # CPU
+                cpu_frame = ctk.CTkFrame(inner, fg_color="transparent")
+                cpu_frame.pack(fill="x", pady=2)
+                ctk.CTkLabel(
+                    cpu_frame,
+                    text="CPU",
+                    font=ctk.CTkFont(size=10),
+                    text_color=COLORS["text_muted"],
+                    width=35
+                ).pack(side="left")
+                
+                cpu_bar = ctk.CTkProgressBar(cpu_frame, width=100, height=6)
+                cpu_bar.set(cpu / 100)
+                cpu_bar.pack(side="left", padx=5)
+                
+                cpu_color = COLORS["success"] if cpu < 70 else COLORS["warning"] if cpu < 90 else COLORS["error"]
+                ctk.CTkLabel(
+                    cpu_frame,
+                    text=f"{cpu:.0f}%",
+                    font=ctk.CTkFont(size=10),
+                    text_color=cpu_color,
+                    width=35
+                ).pack(side="left")
+                
+                # Memory
+                mem_frame = ctk.CTkFrame(inner, fg_color="transparent")
+                mem_frame.pack(fill="x", pady=2)
+                ctk.CTkLabel(
+                    mem_frame,
+                    text="RAM",
+                    font=ctk.CTkFont(size=10),
+                    text_color=COLORS["text_muted"],
+                    width=35
+                ).pack(side="left")
+                
+                mem_bar = ctk.CTkProgressBar(mem_frame, width=100, height=6)
+                mem_bar.set(mem / 100)
+                mem_bar.pack(side="left", padx=5)
+                
+                mem_color = COLORS["success"] if mem < 70 else COLORS["warning"] if mem < 90 else COLORS["error"]
+                ctk.CTkLabel(
+                    mem_frame,
+                    text=f"{mem:.0f}%",
+                    font=ctk.CTkFont(size=10),
+                    text_color=mem_color,
+                    width=35
+                ).pack(side="left")
+            except Exception:
+                pass
+        
+        # Alerts indicator
+        alert_count = 0
+        if self.monitor:
+            try:
+                alerts = self.monitor.get_active_alerts()
+                alert_count = len(alerts)
+            except Exception:
+                pass
+        
+        if alert_count > 0:
+            alert_frame = ctk.CTkFrame(inner, fg_color="transparent")
+            alert_frame.pack(fill="x", pady=(8, 0))
+            
+            ctk.CTkButton(
+                alert_frame,
+                text=f"🔔 {alert_count} Alert{'s' if alert_count > 1 else ''}",
+                height=28,
+                corner_radius=6,
+                font=ctk.CTkFont(size=11),
+                fg_color=COLORS["warning"],
+                hover_color=COLORS["error"],
+                command=self._show_alerts
+            ).pack(fill="x")
+
+    def _create_top_bar(self):
+        """Create top bar with search and actions."""
+        top_bar = ctk.CTkFrame(self.content_area, fg_color=COLORS["bg_secondary"], height=56)
+        top_bar.pack(fill="x")
+        top_bar.pack_propagate(False)
+        
+        inner = ctk.CTkFrame(top_bar, fg_color="transparent")
+        inner.pack(fill="both", expand=True, padx=16, pady=10)
+        
+        # Search / Command palette button
+        search_btn = ctk.CTkButton(
+            inner,
+            text="🔍  Search or type a command...  ⌘K",
+            width=350,
+            height=36,
+            corner_radius=8,
+            font=ctk.CTkFont(size=13),
+            fg_color=COLORS["bg_tertiary"],
+            hover_color=COLORS["border"],
+            text_color=COLORS["text_muted"],
+            anchor="w",
+            command=self._toggle_command_palette
+        )
+        search_btn.pack(side="left")
+        
+        # Right side actions
+        right_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        right_frame.pack(side="right")
+        
+        # Quick actions
+        actions = [
+            ("📋", "Clipboard", self._show_clipboard),
+            ("🔔", "Alerts", self._show_alerts),
+            ("➕", "New Chat", self._new_chat),
+        ]
+        
+        for icon, tooltip, cmd in actions:
+            btn = ctk.CTkButton(
+                right_frame,
+                text=icon,
+                width=36,
+                height=36,
+                corner_radius=8,
+                font=ctk.CTkFont(size=16),
+                fg_color="transparent",
+                hover_color=COLORS["bg_tertiary"],
+                command=cmd
+            )
+            btn.pack(side="left", padx=2)
+
+    def _setup_keyboard_shortcuts(self):
+        """Setup keyboard shortcuts."""
+        self.root.bind("<Control-k>", lambda e: self._toggle_command_palette())
+        self.root.bind("<Command-k>", lambda e: self._toggle_command_palette())
+        self.root.bind("<Control-n>", lambda e: self._new_chat())
+        self.root.bind("<Control-s>", lambda e: self._show_settings())
+        self.root.bind("<Control-q>", lambda e: self._on_exit())
+        self.root.bind("<Escape>", lambda e: self._close_popups())
+    
+    def _start_background_tasks(self):
+        """Start background tasks."""
+        # Start monitoring if available
+        if MONITOR_AVAILABLE and self.monitor:
+            try:
+                self.monitor.start()
+            except Exception:
+                pass
+        
+        # Refresh status periodically
+        self._schedule_status_refresh()
+    
+    def _schedule_status_refresh(self):
+        """Schedule periodic status refresh."""
+        def refresh():
+            try:
+                # Refresh would happen here
+                pass
+            except Exception:
+                pass
+            finally:
+                try:
+                    self.root.after(30000, refresh)  # Every 30 seconds
+                except Exception:
+                    pass
+        
+        try:
+            self.root.after(30000, refresh)
         except Exception:
             pass
 
-    def _show_suggestion_toast(self, suggestion):
-        """Show a suggestion as a toast notification."""
-        if not hasattr(self, 'toast_frame'):
+    # ==================== VIEW METHODS ====================
+    
+    def _clear_content(self):
+        """Clear content frame."""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+    
+    def _show_chat(self):
+        """Show chat view."""
+        self._clear_content()
+        self.current_view = "chat"
+        
+        from .chat import ChatInterface
+        self.chat_interface = ChatInterface(self.content_frame, on_send=self._on_chat_message)
+    
+    def _show_dashboard(self):
+        """Show dashboard view."""
+        self._clear_content()
+        self.current_view = "dashboard"
+        
+        if not USE_CUSTOMTKINTER:
+            ttk.Label(self.content_frame, text="Dashboard").pack(pady=20)
             return
         
-        if USE_CUSTOMTKINTER:
-            toast = ctk.CTkFrame(
-                self.root,
-                fg_color="#2d2d2d",
-                corner_radius=10
-            )
-            toast.place(relx=0.98, rely=0.02, anchor="ne")
-            
-            # Icon and title
-            header = ctk.CTkFrame(toast, fg_color="transparent")
-            header.pack(fill="x", padx=10, pady=(10, 5))
-            
-            ctk.CTkLabel(
-                header,
-                text=f"{suggestion.icon} {suggestion.title}",
-                font=ctk.CTkFont(size=12, weight="bold"),
-                text_color="white"
-            ).pack(side="left")
-            
-            # Close button
-            close_btn = ctk.CTkButton(
-                header,
-                text="×",
-                width=20,
-                height=20,
-                command=toast.destroy,
-                fg_color="transparent",
-                hover_color="#444"
-            )
-            close_btn.pack(side="right")
-            
-            # Message
-            ctk.CTkLabel(
-                toast,
-                text=suggestion.message,
-                font=ctk.CTkFont(size=11),
-                text_color="#aaa",
-                wraplength=250
-            ).pack(padx=10, pady=5)
-            
-            # Action button if available
-            if suggestion.action:
-                action_btn = ctk.CTkButton(
-                    toast,
-                    text="Do it",
-                    width=60,
-                    height=25,
-                    command=lambda: self._execute_suggestion(suggestion, toast),
-                    fg_color="#4a9eff"
-                )
-                action_btn.pack(pady=(0, 10))
-            
-            # Auto-dismiss after 10 seconds
-            toast.after(10000, lambda: toast.destroy() if toast.winfo_exists() else None)
-
-    def _execute_suggestion(self, suggestion, toast):
-        """Execute a proactive suggestion."""
-        if toast and hasattr(toast, 'winfo_exists') and toast.winfo_exists():
-            toast.destroy()
+        # Dashboard content
+        scroll = ctk.CTkScrollableFrame(self.content_frame, fg_color=COLORS["bg"])
+        scroll.pack(fill="both", expand=True)
         
-        if suggestion.action and self.chat_interface:
-            # Send the action as a chat message
-            self._show_chat()
-            self.chat_interface._send_message_direct(suggestion.action)
+        # Title
+        ctk.CTkLabel(
+            scroll,
+            text="📊 System Dashboard",
+            font=ctk.CTkFont(size=24, weight="bold")
+        ).pack(anchor="w", padx=20, pady=(20, 15))
+        
+        # Stats cards
+        stats_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        stats_frame.pack(fill="x", padx=20, pady=10)
+        
+        stats = self._get_system_stats()
+        
+        for i, (title, value, icon, color) in enumerate(stats):
+            card = ctk.CTkFrame(stats_frame, fg_color=COLORS["bg_secondary"], corner_radius=12)
+            card.grid(row=0, column=i, padx=8, pady=8, sticky="nsew")
+            stats_frame.grid_columnconfigure(i, weight=1)
+            
+            inner = ctk.CTkFrame(card, fg_color="transparent")
+            inner.pack(padx=20, pady=20)
+            
+            ctk.CTkLabel(inner, text=icon, font=ctk.CTkFont(size=28)).pack()
+            ctk.CTkLabel(
+                inner,
+                text=value,
+                font=ctk.CTkFont(size=32, weight="bold"),
+                text_color=color
+            ).pack(pady=(10, 5))
+            ctk.CTkLabel(
+                inner,
+                text=title,
+                font=ctk.CTkFont(size=12),
+                text_color=COLORS["text_muted"]
+            ).pack()
+        
+        # Quick actions
+        ctk.CTkLabel(
+            scroll,
+            text="Quick Actions",
+            font=ctk.CTkFont(size=16, weight="bold")
+        ).pack(anchor="w", padx=20, pady=(20, 10))
+        
+        actions_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        actions_frame.pack(fill="x", padx=20)
+        
+        quick_actions = [
+            ("🏥 Health Check", "Run health check"),
+            ("🧹 Clean Temp", "Clean temporary files"),
+            ("📊 Top Processes", "Show top processes"),
+            ("🌐 Network Status", "Check network status"),
+            ("🔒 Security Scan", "Run security scan"),
+        ]
+        
+        for text, cmd in quick_actions:
+            btn = ctk.CTkButton(
+                actions_frame,
+                text=text,
+                height=40,
+                corner_radius=8,
+                fg_color=COLORS["bg_tertiary"],
+                hover_color=COLORS["border"],
+                command=lambda c=cmd: self._quick_action(c)
+            )
+            btn.pack(side="left", padx=5, pady=5)
+    
+    def _get_system_stats(self) -> list:
+        """Get system statistics."""
+        stats = []
+        
+        if PSUTIL_AVAILABLE:
+            try:
+                cpu = psutil.cpu_percent(interval=0.1)
+                mem = psutil.virtual_memory()
+                disk = psutil.disk_usage('/')
+                
+                cpu_color = COLORS["success"] if cpu < 70 else COLORS["warning"] if cpu < 90 else COLORS["error"]
+                mem_color = COLORS["success"] if mem.percent < 70 else COLORS["warning"] if mem.percent < 90 else COLORS["error"]
+                disk_color = COLORS["success"] if disk.percent < 70 else COLORS["warning"] if disk.percent < 90 else COLORS["error"]
+                
+                stats = [
+                    ("CPU Usage", f"{cpu:.0f}%", "🔥", cpu_color),
+                    ("Memory", f"{mem.percent:.0f}%", "💾", mem_color),
+                    ("Disk", f"{disk.percent:.0f}%", "💿", disk_color),
+                    ("Processes", str(len(psutil.pids())), "📋", COLORS["accent"]),
+                ]
+            except Exception:
+                pass
+        
+        if not stats:
+            stats = [
+                ("CPU", "N/A", "🔥", COLORS["text_muted"]),
+                ("Memory", "N/A", "💾", COLORS["text_muted"]),
+                ("Disk", "N/A", "💿", COLORS["text_muted"]),
+                ("Processes", "N/A", "📋", COLORS["text_muted"]),
+            ]
+        
+        return stats
+    
+    def _show_activity(self):
+        """Show activity view."""
+        self._clear_content()
+        self.current_view = "activity"
+        
+        if not USE_CUSTOMTKINTER:
+            ttk.Label(self.content_frame, text="Activity").pack(pady=20)
+            return
+        
+        try:
+            from .activity_dashboard import ActivityDashboard
+            dashboard = ActivityDashboard.create(self.content_frame)
+        except Exception as e:
+            ctk.CTkLabel(
+                self.content_frame,
+                text=f"Activity dashboard unavailable: {e}",
+                text_color=COLORS["text_muted"]
+            ).pack(pady=40)
+    
+    def _show_settings(self):
+        """Show settings view."""
+        self._clear_content()
+        self.current_view = "settings"
+        
+        if not USE_CUSTOMTKINTER:
+            ttk.Label(self.content_frame, text="Settings").pack(pady=20)
+            return
+        
+        scroll = ctk.CTkScrollableFrame(self.content_frame, fg_color=COLORS["bg"])
+        scroll.pack(fill="both", expand=True)
+        
+        ctk.CTkLabel(
+            scroll,
+            text="⚙️ Settings",
+            font=ctk.CTkFont(size=24, weight="bold")
+        ).pack(anchor="w", padx=20, pady=(20, 15))
+        
+        # API Key section
+        self._create_settings_section(scroll, "🔑 API Configuration", [
+            ("OpenAI API Key", "OPENAI_API_KEY", True),
+        ])
+        
+        # Model section
+        self._create_settings_section(scroll, "🤖 Model Settings", [
+            ("Model Name", "gpt-4o-mini", False),
+        ])
+        
+        # Monitoring section
+        self._create_monitoring_settings(scroll)
+    
+    def _create_settings_section(self, parent, title: str, fields: list):
+        """Create a settings section."""
+        section = ctk.CTkFrame(parent, fg_color=COLORS["bg_secondary"], corner_radius=12)
+        section.pack(fill="x", padx=20, pady=10)
+        
+        ctk.CTkLabel(
+            section,
+            text=title,
+            font=ctk.CTkFont(size=14, weight="bold")
+        ).pack(anchor="w", padx=16, pady=(16, 10))
+        
+        for label, default, is_secret in fields:
+            field_frame = ctk.CTkFrame(section, fg_color="transparent")
+            field_frame.pack(fill="x", padx=16, pady=5)
+            
+            ctk.CTkLabel(
+                field_frame,
+                text=label,
+                font=ctk.CTkFont(size=12),
+                text_color=COLORS["text_secondary"]
+            ).pack(anchor="w")
+            
+            entry = ctk.CTkEntry(
+                field_frame,
+                placeholder_text=default,
+                show="*" if is_secret else "",
+                height=36
+            )
+            entry.pack(fill="x", pady=(5, 0))
+        
+        ctk.CTkButton(
+            section,
+            text="Save",
+            width=100,
+            height=32,
+            corner_radius=6
+        ).pack(anchor="w", padx=16, pady=16)
+    
+    def _create_monitoring_settings(self, parent):
+        """Create monitoring settings."""
+        section = ctk.CTkFrame(parent, fg_color=COLORS["bg_secondary"], corner_radius=12)
+        section.pack(fill="x", padx=20, pady=10)
+        
+        ctk.CTkLabel(
+            section,
+            text="🔔 Monitoring Thresholds",
+            font=ctk.CTkFont(size=14, weight="bold")
+        ).pack(anchor="w", padx=16, pady=(16, 10))
+        
+        thresholds = [
+            ("CPU Warning", "80%"),
+            ("Memory Warning", "80%"),
+            ("Disk Warning", "80%"),
+        ]
+        
+        for label, default in thresholds:
+            row = ctk.CTkFrame(section, fg_color="transparent")
+            row.pack(fill="x", padx=16, pady=5)
+            
+            ctk.CTkLabel(row, text=label, width=120).pack(side="left")
+            
+            entry = ctk.CTkEntry(row, width=80, placeholder_text=default)
+            entry.pack(side="left", padx=10)
+        
+        ctk.CTkLabel(section, text="", height=10).pack()
+    
+    def _show_terminal(self):
+        """Show terminal view."""
+        self._clear_content()
+        self.current_view = "terminal"
+        
+        if not USE_CUSTOMTKINTER:
+            ttk.Label(self.content_frame, text="Terminal").pack(pady=20)
+            return
+        
+        # Terminal header
+        header = ctk.CTkFrame(self.content_frame, fg_color=COLORS["bg_secondary"], height=50)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        
+        ctk.CTkLabel(
+            header,
+            text="🖥️ Terminal",
+            font=ctk.CTkFont(size=16, weight="bold")
+        ).pack(side="left", padx=16, pady=12)
+        
+        # Output area
+        self.terminal_output = ctk.CTkTextbox(
+            self.content_frame,
+            font=ctk.CTkFont(family="Consolas", size=12),
+            fg_color=COLORS["bg"],
+            text_color=COLORS["text"]
+        )
+        self.terminal_output.pack(fill="both", expand=True, padx=10, pady=5)
+        self.terminal_output.insert("end", "$ Welcome to SysAgent Terminal\n$ Type commands below\n\n")
+        
+        # Input area
+        input_frame = ctk.CTkFrame(self.content_frame, fg_color=COLORS["bg_secondary"])
+        input_frame.pack(fill="x", padx=10, pady=10)
+        
+        ctk.CTkLabel(input_frame, text="$", font=ctk.CTkFont(size=14)).pack(side="left", padx=(10, 5))
+        
+        self.terminal_input = ctk.CTkEntry(
+            input_frame,
+            placeholder_text="Enter command...",
+            height=36,
+            font=ctk.CTkFont(family="Consolas", size=12)
+        )
+        self.terminal_input.pack(side="left", fill="x", expand=True, padx=5, pady=8)
+        self.terminal_input.bind("<Return>", self._run_terminal_command)
+        
+        ctk.CTkButton(
+            input_frame,
+            text="Run",
+            width=60,
+            height=32,
+            command=self._run_terminal_command
+        ).pack(side="right", padx=10)
 
+    # ==================== SMART FEATURE POPUPS ====================
+    
+    def _show_suggestions(self):
+        """Show smart suggestions popup."""
+        if not USE_CUSTOMTKINTER:
+            return
+        
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("Smart Suggestions")
+        popup.geometry("500x400")
+        popup.transient(self.root)
+        popup.configure(fg_color=COLORS["bg"])
+        
+        # Header
+        header = ctk.CTkFrame(popup, fg_color=COLORS["bg_secondary"])
+        header.pack(fill="x")
+        ctk.CTkLabel(
+            header,
+            text="⚡ Smart Suggestions",
+            font=ctk.CTkFont(size=16, weight="bold")
+        ).pack(pady=16)
+        
+        # Content
+        content = ctk.CTkScrollableFrame(popup, fg_color=COLORS["bg"])
+        content.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        if not self.learning:
+            ctk.CTkLabel(content, text="Learning system not available", text_color=COLORS["text_muted"]).pack(pady=30)
+            return
+        
+        # Time-based suggestions
+        ctk.CTkLabel(content, text="Based on your patterns:", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10, 5))
+        
+        time_sugg = self.learning.get_time_based_suggestions()
+        if time_sugg:
+            for s in time_sugg:
+                self._create_suggestion_card(content, s['command'], s['reason'], popup)
+        else:
+            ctk.CTkLabel(content, text="No patterns detected yet", text_color=COLORS["text_muted"]).pack(anchor="w", padx=10)
+        
+        # Most used
+        ctk.CTkLabel(content, text="Most used commands:", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(20, 5))
+        
+        most_used = self.learning.get_most_used_commands(5)
+        for cmd, count in most_used:
+            self._create_suggestion_card(content, cmd, f"Used {count} times", popup)
+    
+    def _create_suggestion_card(self, parent, command: str, reason: str, popup):
+        """Create a suggestion card."""
+        card = ctk.CTkFrame(parent, fg_color=COLORS["bg_secondary"], corner_radius=8)
+        card.pack(fill="x", pady=3)
+        
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.pack(fill="x", padx=12, pady=10)
+        
+        text_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        text_frame.pack(side="left", fill="x", expand=True)
+        
+        ctk.CTkLabel(
+            text_frame,
+            text=command[:50],
+            font=ctk.CTkFont(size=12),
+            anchor="w"
+        ).pack(anchor="w")
+        
+        ctk.CTkLabel(
+            text_frame,
+            text=reason,
+            font=ctk.CTkFont(size=10),
+            text_color=COLORS["text_muted"],
+            anchor="w"
+        ).pack(anchor="w")
+        
+        ctk.CTkButton(
+            inner,
+            text="Use",
+            width=50,
+            height=28,
+            corner_radius=6,
+            font=ctk.CTkFont(size=11),
+            command=lambda: self._use_suggestion(command, popup)
+        ).pack(side="right")
+    
+    def _use_suggestion(self, command: str, popup):
+        """Use a suggestion."""
+        popup.destroy()
+        self._show_chat()
+        self.root.after(100, lambda: self._quick_action(command))
+    
+    def _show_snippets(self):
+        """Show snippets popup."""
+        if not USE_CUSTOMTKINTER:
+            return
+        
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("Snippets")
+        popup.geometry("550x450")
+        popup.transient(self.root)
+        popup.configure(fg_color=COLORS["bg"])
+        
+        # Header
+        header = ctk.CTkFrame(popup, fg_color=COLORS["bg_secondary"])
+        header.pack(fill="x")
+        
+        h_inner = ctk.CTkFrame(header, fg_color="transparent")
+        h_inner.pack(fill="x", padx=16, pady=12)
+        
+        ctk.CTkLabel(h_inner, text="📌 Snippets", font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
+        
+        ctk.CTkButton(
+            h_inner,
+            text="+ New",
+            width=70,
+            height=28,
+            corner_radius=6,
+            command=lambda: self._create_snippet(popup)
+        ).pack(side="right")
+        
+        # Search
+        search = ctk.CTkEntry(popup, placeholder_text="Search snippets...", height=36)
+        search.pack(fill="x", padx=16, pady=10)
+        
+        # Content
+        content = ctk.CTkScrollableFrame(popup, fg_color=COLORS["bg"])
+        content.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        def render_snippets(query=""):
+            for w in content.winfo_children():
+                w.destroy()
+            
+            snippets = []
+            if self.learning:
+                snippets = self.learning.search_snippets(query)
+            
+            if not snippets:
+                ctk.CTkLabel(content, text="No snippets found", text_color=COLORS["text_muted"]).pack(pady=30)
+                return
+            
+            for snip in snippets:
+                card = ctk.CTkFrame(content, fg_color=COLORS["bg_secondary"], corner_radius=8)
+                card.pack(fill="x", pady=3)
+                
+                inner = ctk.CTkFrame(card, fg_color="transparent")
+                inner.pack(fill="x", padx=12, pady=10)
+                
+                fav = "⭐ " if snip.get('is_favorite') else ""
+                ctk.CTkLabel(
+                    inner,
+                    text=f"{fav}{snip['name']}",
+                    font=ctk.CTkFont(size=12, weight="bold")
+                ).pack(anchor="w")
+                
+                ctk.CTkLabel(
+                    inner,
+                    text=snip['command'][:60],
+                    font=ctk.CTkFont(size=11),
+                    text_color=COLORS["text_secondary"]
+                ).pack(anchor="w")
+                
+                btn_frame = ctk.CTkFrame(inner, fg_color="transparent")
+                btn_frame.pack(anchor="e", pady=(5, 0))
+                
+                ctk.CTkButton(
+                    btn_frame,
+                    text="Use",
+                    width=50,
+                    height=24,
+                    corner_radius=4,
+                    font=ctk.CTkFont(size=10),
+                    command=lambda c=snip['command']: self._use_suggestion(c, popup)
+                ).pack(side="left", padx=2)
+        
+        search.bind("<KeyRelease>", lambda e: render_snippets(search.get()))
+        render_snippets()
+    
+    def _create_snippet(self, parent_popup):
+        """Show create snippet dialog."""
+        parent_popup.destroy()
+        
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("New Snippet")
+        dialog.geometry("400x300")
+        dialog.transient(self.root)
+        dialog.configure(fg_color=COLORS["bg"])
+        
+        ctk.CTkLabel(dialog, text="Create Snippet", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=16)
+        
+        # Name
+        ctk.CTkLabel(dialog, text="Name:", anchor="w").pack(anchor="w", padx=20)
+        name_entry = ctk.CTkEntry(dialog, placeholder_text="Snippet name")
+        name_entry.pack(fill="x", padx=20, pady=(0, 10))
+        
+        # Command
+        ctk.CTkLabel(dialog, text="Command:", anchor="w").pack(anchor="w", padx=20)
+        cmd_entry = ctk.CTkEntry(dialog, placeholder_text="Command to save")
+        cmd_entry.pack(fill="x", padx=20, pady=(0, 10))
+        
+        # Tags
+        ctk.CTkLabel(dialog, text="Tags (comma-separated):", anchor="w").pack(anchor="w", padx=20)
+        tags_entry = ctk.CTkEntry(dialog, placeholder_text="tag1, tag2")
+        tags_entry.pack(fill="x", padx=20, pady=(0, 20))
+        
+        def save():
+            if self.learning and name_entry.get() and cmd_entry.get():
+                tags = [t.strip() for t in tags_entry.get().split(",") if t.strip()]
+                self.learning.save_snippet(name_entry.get(), cmd_entry.get(), "", tags)
+                dialog.destroy()
+                self._show_snippets()
+        
+        ctk.CTkButton(dialog, text="Save Snippet", command=save).pack(pady=10)
+    
+    def _show_shortcuts(self):
+        """Show shortcuts popup."""
+        if not USE_CUSTOMTKINTER:
+            return
+        
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("Shortcuts")
+        popup.geometry("500x400")
+        popup.transient(self.root)
+        popup.configure(fg_color=COLORS["bg"])
+        
+        # Header
+        header = ctk.CTkFrame(popup, fg_color=COLORS["bg_secondary"])
+        header.pack(fill="x")
+        
+        h_inner = ctk.CTkFrame(header, fg_color="transparent")
+        h_inner.pack(fill="x", padx=16, pady=12)
+        
+        ctk.CTkLabel(h_inner, text="⌨️ Shortcuts", font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
+        
+        ctk.CTkButton(
+            h_inner,
+            text="+ New",
+            width=70,
+            height=28,
+            corner_radius=6,
+            command=lambda: self._create_shortcut(popup)
+        ).pack(side="right")
+        
+        # Content
+        content = ctk.CTkScrollableFrame(popup, fg_color=COLORS["bg"])
+        content.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        shortcuts = []
+        if self.learning:
+            shortcuts = self.learning.list_shortcuts()
+        
+        if not shortcuts:
+            ctk.CTkLabel(content, text="No shortcuts yet\nCreate one to get started!", text_color=COLORS["text_muted"]).pack(pady=40)
+        else:
+            for s in shortcuts:
+                card = ctk.CTkFrame(content, fg_color=COLORS["bg_secondary"], corner_radius=8)
+                card.pack(fill="x", pady=3)
+                
+                inner = ctk.CTkFrame(card, fg_color="transparent")
+                inner.pack(fill="x", padx=12, pady=10)
+                
+                ctk.CTkLabel(inner, text=s['name'], font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w")
+                ctk.CTkLabel(inner, text=s['command'], font=ctk.CTkFont(size=11), text_color=COLORS["text_secondary"]).pack(anchor="w")
+                
+                ctk.CTkButton(
+                    inner,
+                    text="Run",
+                    width=50,
+                    height=24,
+                    corner_radius=4,
+                    font=ctk.CTkFont(size=10),
+                    command=lambda c=s['command']: self._use_suggestion(c, popup)
+                ).pack(anchor="e", pady=(5, 0))
+    
+    def _create_shortcut(self, parent_popup):
+        """Show create shortcut dialog."""
+        parent_popup.destroy()
+        
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("New Shortcut")
+        dialog.geometry("400x250")
+        dialog.transient(self.root)
+        dialog.configure(fg_color=COLORS["bg"])
+        
+        ctk.CTkLabel(dialog, text="Create Shortcut", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=16)
+        
+        ctk.CTkLabel(dialog, text="Shortcut name:", anchor="w").pack(anchor="w", padx=20)
+        name_entry = ctk.CTkEntry(dialog, placeholder_text="e.g., ss")
+        name_entry.pack(fill="x", padx=20, pady=(0, 10))
+        
+        ctk.CTkLabel(dialog, text="Command:", anchor="w").pack(anchor="w", padx=20)
+        cmd_entry = ctk.CTkEntry(dialog, placeholder_text="show system status")
+        cmd_entry.pack(fill="x", padx=20, pady=(0, 20))
+        
+        def save():
+            if self.learning and name_entry.get() and cmd_entry.get():
+                self.learning.add_shortcut(name_entry.get(), cmd_entry.get())
+                dialog.destroy()
+                self._show_shortcuts()
+        
+        ctk.CTkButton(dialog, text="Save Shortcut", command=save).pack(pady=10)
+    
+    def _show_history_panel(self):
+        """Show command history popup."""
+        if not USE_CUSTOMTKINTER:
+            return
+        
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("Command History")
+        popup.geometry("550x450")
+        popup.transient(self.root)
+        popup.configure(fg_color=COLORS["bg"])
+        
+        # Header
+        header = ctk.CTkFrame(popup, fg_color=COLORS["bg_secondary"])
+        header.pack(fill="x")
+        ctk.CTkLabel(header, text="📜 Command History", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=16)
+        
+        # Search
+        search = ctk.CTkEntry(popup, placeholder_text="Search history...", height=36)
+        search.pack(fill="x", padx=16, pady=10)
+        
+        # Content
+        content = ctk.CTkScrollableFrame(popup, fg_color=COLORS["bg"])
+        content.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        def render_history(query=""):
+            for w in content.winfo_children():
+                w.destroy()
+            
+            history = []
+            if self.learning:
+                history = self.learning.search_history(query, limit=50)
+            
+            if not history:
+                ctk.CTkLabel(content, text="No history found", text_color=COLORS["text_muted"]).pack(pady=30)
+                return
+            
+            for entry in history:
+                cmd = entry.get('command', '')
+                ts = entry.get('timestamp', '')[:10]
+                
+                row = ctk.CTkFrame(content, fg_color=COLORS["bg_secondary"], corner_radius=6)
+                row.pack(fill="x", pady=2)
+                
+                inner = ctk.CTkFrame(row, fg_color="transparent")
+                inner.pack(fill="x", padx=10, pady=8)
+                
+                ctk.CTkLabel(inner, text=ts, font=ctk.CTkFont(size=10), text_color=COLORS["text_muted"], width=70).pack(side="left")
+                ctk.CTkLabel(inner, text=cmd[:50], font=ctk.CTkFont(size=11), anchor="w").pack(side="left", fill="x", expand=True)
+                
+                ctk.CTkButton(
+                    inner,
+                    text="Use",
+                    width=45,
+                    height=22,
+                    corner_radius=4,
+                    font=ctk.CTkFont(size=10),
+                    command=lambda c=cmd: self._use_suggestion(c, popup)
+                ).pack(side="right")
+        
+        search.bind("<KeyRelease>", lambda e: render_history(search.get()))
+        render_history()
+    
+    def _show_alerts(self):
+        """Show alerts popup."""
+        if not USE_CUSTOMTKINTER:
+            return
+        
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("System Alerts")
+        popup.geometry("500x400")
+        popup.transient(self.root)
+        popup.configure(fg_color=COLORS["bg"])
+        
+        # Header
+        header = ctk.CTkFrame(popup, fg_color=COLORS["bg_secondary"])
+        header.pack(fill="x")
+        
+        h_inner = ctk.CTkFrame(header, fg_color="transparent")
+        h_inner.pack(fill="x", padx=16, pady=12)
+        
+        ctk.CTkLabel(h_inner, text="🔔 System Alerts", font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
+        
+        if self.monitor:
+            ctk.CTkButton(
+                h_inner,
+                text="Dismiss All",
+                width=90,
+                height=28,
+                corner_radius=6,
+                fg_color=COLORS["bg_tertiary"],
+                command=lambda: self._dismiss_all_alerts(popup)
+            ).pack(side="right")
+        
+        # Content
+        content = ctk.CTkScrollableFrame(popup, fg_color=COLORS["bg"])
+        content.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        alerts = []
+        if self.monitor:
+            alerts = self.monitor.get_active_alerts()
+        
+        if not alerts:
+            ctk.CTkLabel(
+                content,
+                text="✅ No active alerts\nYour system is running smoothly!",
+                text_color=COLORS["success"],
+                font=ctk.CTkFont(size=14)
+            ).pack(pady=50)
+        else:
+            for alert in alerts:
+                level_color = {
+                    'critical': COLORS["error"],
+                    'warning': COLORS["warning"],
+                    'info': COLORS["accent"]
+                }.get(alert.level, COLORS["text_secondary"])
+                
+                card = ctk.CTkFrame(
+                    content,
+                    fg_color=COLORS["bg_secondary"],
+                    corner_radius=8,
+                    border_width=1,
+                    border_color=level_color
+                )
+                card.pack(fill="x", pady=4)
+                
+                inner = ctk.CTkFrame(card, fg_color="transparent")
+                inner.pack(fill="x", padx=12, pady=10)
+                
+                ctk.CTkLabel(inner, text=alert.title, font=ctk.CTkFont(size=13, weight="bold"), text_color=level_color).pack(anchor="w")
+                ctk.CTkLabel(inner, text=alert.message, font=ctk.CTkFont(size=11), text_color=COLORS["text_secondary"], wraplength=400).pack(anchor="w", pady=(4, 0))
+                
+                if alert.action:
+                    ctk.CTkButton(
+                        inner,
+                        text="Fix",
+                        width=50,
+                        height=26,
+                        corner_radius=6,
+                        font=ctk.CTkFont(size=11),
+                        command=lambda a=alert.action: self._use_suggestion(a, popup)
+                    ).pack(anchor="w", pady=(8, 0))
+    
+    def _dismiss_all_alerts(self, popup):
+        """Dismiss all alerts."""
+        if self.monitor:
+            self.monitor.dismiss_all()
+        popup.destroy()
+    
+    def _show_clipboard(self):
+        """Show clipboard actions popup."""
+        if not USE_CUSTOMTKINTER or not CLIPBOARD_AVAILABLE:
+            return
+        
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("Clipboard")
+        popup.geometry("450x350")
+        popup.transient(self.root)
+        popup.configure(fg_color=COLORS["bg"])
+        
+        # Header
+        header = ctk.CTkFrame(popup, fg_color=COLORS["bg_secondary"])
+        header.pack(fill="x")
+        ctk.CTkLabel(header, text="📋 Smart Clipboard", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=16)
+        
+        # Content
+        content = ctk.CTkScrollableFrame(popup, fg_color=COLORS["bg"])
+        content.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        try:
+            clipboard = get_smart_clipboard()
+            
+            # Get current clipboard content
+            import subprocess
+            import platform
+            
+            clip_content = ""
+            try:
+                if platform.system() == "Darwin":
+                    result = subprocess.run(['pbpaste'], capture_output=True, text=True)
+                    clip_content = result.stdout
+                elif platform.system() == "Linux":
+                    result = subprocess.run(['xclip', '-selection', 'clipboard', '-o'], capture_output=True, text=True)
+                    clip_content = result.stdout
+            except Exception:
+                pass
+            
+            if clip_content:
+                entry = clipboard.process_content(clip_content)
+                
+                ctk.CTkLabel(content, text=f"Content Type: {entry.content_type}", font=ctk.CTkFont(size=12)).pack(anchor="w", pady=(0, 10))
+                
+                # Preview
+                preview_frame = ctk.CTkFrame(content, fg_color=COLORS["bg_secondary"], corner_radius=8)
+                preview_frame.pack(fill="x", pady=5)
+                ctk.CTkLabel(
+                    preview_frame,
+                    text=entry.preview,
+                    font=ctk.CTkFont(size=11),
+                    text_color=COLORS["text_secondary"],
+                    wraplength=380
+                ).pack(padx=12, pady=10)
+                
+                # Actions
+                ctk.CTkLabel(content, text="Actions:", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(15, 5))
+                
+                for action in entry.actions:
+                    btn = ctk.CTkButton(
+                        content,
+                        text=f"{action.icon} {action.label}",
+                        height=36,
+                        corner_radius=8,
+                        fg_color=COLORS["bg_tertiary"],
+                        hover_color=COLORS["border"],
+                        anchor="w",
+                        command=lambda a=action.command: self._use_suggestion(a, popup)
+                    )
+                    btn.pack(fill="x", pady=2)
+            else:
+                ctk.CTkLabel(content, text="Clipboard is empty", text_color=COLORS["text_muted"]).pack(pady=30)
+        except Exception as e:
+            ctk.CTkLabel(content, text=f"Error: {e}", text_color=COLORS["error"]).pack(pady=30)
+    
+    def _show_mode_selector(self):
+        """Show mode selector popup."""
+        if not USE_CUSTOMTKINTER:
+            return
+        
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("Select Mode")
+        popup.geometry("350x400")
+        popup.transient(self.root)
+        popup.configure(fg_color=COLORS["bg"])
+        
+        ctk.CTkLabel(popup, text="🎯 Select Agent Mode", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=20)
+        
+        modes = [
+            ("🧠", "General", "general", "All-purpose assistant"),
+            ("👨‍💻", "Developer", "developer", "Git, code, packages"),
+            ("🔧", "SysAdmin", "sysadmin", "System administration"),
+            ("🔒", "Security", "security", "Security auditing"),
+            ("⚡", "Productivity", "productivity", "Apps and workflows"),
+            ("🤖", "Automation", "automation", "Workflow automation"),
+        ]
+        
+        for icon, name, mode_id, desc in modes:
+            is_current = mode_id == self.current_mode
+            
+            btn = ctk.CTkButton(
+                popup,
+                text=f"  {icon}  {name}\n      {desc}",
+                height=50,
+                corner_radius=8,
+                fg_color=COLORS["accent"] if is_current else COLORS["bg_secondary"],
+                hover_color=COLORS["accent_hover"] if is_current else COLORS["bg_tertiary"],
+                anchor="w",
+                command=lambda m=mode_id, p=popup: self._set_mode(m, p)
+            )
+            btn.pack(fill="x", padx=20, pady=3)
+    
+    def _set_mode(self, mode: str, popup=None):
+        """Set agent mode."""
+        try:
+            from ..core.agent_modes import get_mode_manager
+            mm = get_mode_manager()
+            mode_enum = mm.get_mode_by_name(mode)
+            if mode_enum:
+                mm.set_mode(mode_enum)
+                self.current_mode = mode
+                if popup:
+                    popup.destroy()
+                # Refresh UI
+                self._refresh_layout()
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not change mode: {e}")
+    
+    def _refresh_layout(self):
+        """Refresh the entire layout."""
+        self.main_container.destroy()
+        self._create_layout()
+
+    # ==================== ACTIONS ====================
+    
     def _toggle_command_palette(self):
-        """Toggle the command palette."""
+        """Toggle command palette."""
         try:
             from .command_palette import CommandPalette
             
             if self.command_palette is None:
-                self.command_palette = CommandPalette(
-                    self.root,
-                    on_command=self._on_palette_command
-                )
+                self.command_palette = CommandPalette(self.root, on_command=self._on_palette_command)
             
-            # Check if palette popup exists
             if self.command_palette.popup is not None:
                 self.command_palette.close()
             else:
                 self.command_palette.open()
         except Exception as e:
             print(f"Warning: Could not open command palette: {e}")
-
+    
     def _on_palette_command(self, command: str):
-        """Handle a command from the command palette."""
-        if command and self.chat_interface:
-            # Switch to chat if not already there
-            if self.current_view != "chat":
-                self._show_chat()
-                # Need to wait for chat to be ready
-                self.root.after(100, lambda: self._send_palette_command(command))
-            else:
-                self._send_palette_command(command)
-
-    def _send_palette_command(self, command: str):
-        """Send command from palette to chat."""
-        if self.chat_interface:
-            # Send directly using the helper method
-            self.chat_interface._send_message_direct(command)
-
-    def _quick_insights(self):
-        """Show quick system insights."""
-        if self.chat_interface:
-            if self.current_view != "chat":
-                self._show_chat()
-                self.root.after(100, lambda: self._send_palette_command("Give me quick system insights"))
-            else:
-                self._send_palette_command("Give me quick system insights")
-
-    def _set_theme(self, theme: str):
-        """Set the application theme."""
-        self.current_theme = theme
-        if USE_CUSTOMTKINTER:
-            ctk.set_appearance_mode(theme)
-        messagebox.showinfo("Theme", f"Theme set to: {theme.title()}")
+        """Handle command from palette."""
+        if command:
+            self._show_chat()
+            self.root.after(100, lambda: self._quick_action(command))
     
-    def _set_mode(self, mode: str):
-        """Set the agent mode."""
-        try:
-            from ..core.agent_modes import get_mode_manager, AgentMode
-            mm = get_mode_manager()
-            mode_enum = mm.get_mode_by_name(mode)
-            if mode_enum:
-                config = mm.set_mode(mode_enum)
-                self.current_mode = mode
-                messagebox.showinfo("Mode Changed", f"Switched to {config.icon} {config.display_name}\n\n{config.description}")
-                
-                # Update the sidebar if in chat view
-                if self.current_view == "chat":
-                    self._show_chat()
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not change mode: {e}")
-    
-    def _show_sessions(self):
-        """Show session management dialog."""
-        if not self.session_manager:
-            messagebox.showerror("Error", "Session manager not available")
+    def _quick_action(self, action: str):
+        """Execute a quick action."""
+        if self.current_view != "chat":
+            self._show_chat()
+            self.root.after(100, lambda: self._quick_action(action))
             return
         
-        if USE_CUSTOMTKINTER:
-            session_window = ctk.CTkToplevel(self.root)
-            session_window.title("Chat Sessions")
-            session_window.geometry("500x400")
-            
-            # Title
-            ctk.CTkLabel(
-                session_window,
-                text="📁 Chat Sessions",
-                font=ctk.CTkFont(size=18, weight="bold")
-            ).pack(pady=15)
-            
-            # Sessions list
-            sessions_frame = ctk.CTkScrollableFrame(session_window, height=250)
-            sessions_frame.pack(fill="both", expand=True, padx=20, pady=10)
-            
-            sessions = self.session_manager.list_sessions(limit=20)
-            
-            if not sessions:
-                ctk.CTkLabel(sessions_frame, text="No sessions found").pack(pady=20)
-            else:
-                for session in sessions:
-                    row = ctk.CTkFrame(sessions_frame, fg_color="#2d2d2d", corner_radius=8)
-                    row.pack(fill="x", pady=3)
-                    
-                    # Session info
-                    info_frame = ctk.CTkFrame(row, fg_color="transparent")
-                    info_frame.pack(side="left", fill="x", expand=True, padx=10, pady=8)
-                    
-                    ctk.CTkLabel(
-                        info_frame,
-                        text=session['title'][:40],
-                        font=ctk.CTkFont(weight="bold"),
-                        anchor="w"
-                    ).pack(anchor="w")
-                    
-                    ctk.CTkLabel(
-                        info_frame,
-                        text=f"{session['message_count']} messages • {session['updated_at'][:10]}",
-                        font=ctk.CTkFont(size=11),
-                        text_color="#888",
-                        anchor="w"
-                    ).pack(anchor="w")
-                    
-                    # Load button
-                    ctk.CTkButton(
-                        row,
-                        text="Open",
-                        width=60,
-                        height=28,
-                        command=lambda s=session['id']: self._load_session(s, session_window)
-                    ).pack(side="right", padx=10)
-            
-            # New session button
-            ctk.CTkButton(
-                session_window,
-                text="+ New Session",
-                command=lambda: self._create_new_session(session_window),
-                width=150
-            ).pack(pady=15)
-        else:
-            messagebox.showinfo("Sessions", "Use sysagent sessions list in CLI")
-    
-    def _load_session(self, session_id: str, window):
-        """Load a session."""
-        try:
-            session = self.session_manager.load_session(session_id)
-            if session:
-                window.destroy()
-                self._show_chat()
-                # Display session messages
-                if self.chat_interface and session.messages:
-                    self.chat_interface.clear_chat()
-                    for msg in session.messages:
-                        from .chat import MessageType
-                        msg_type = MessageType.USER if msg.role == "user" else MessageType.ASSISTANT
-                        self.chat_interface._add_message(msg.content, msg_type)
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not load session: {e}")
-    
-    def _create_new_session(self, window):
-        """Create a new session."""
-        if self.session_manager:
-            self.session_manager.create_session()
-            window.destroy()
-            self._new_chat()
-    
-    def _export_current_chat(self):
-        """Export current chat session."""
         if self.chat_interface:
-            self.chat_interface._export_chat()
+            self.chat_interface._send_message_direct(action)
     
-    def _show_activity(self):
-        """Show activity dashboard."""
-        try:
-            from .activity_dashboard import ActivityDashboard
-            
-            if USE_CUSTOMTKINTER:
-                dashboard = ActivityDashboard()
-                dashboard.show_as_popup()
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not open activity dashboard: {e}")
-
     def _new_chat(self):
-        """Start a new chat session."""
-        # Always show chat view (which will recreate the interface)
+        """Start new chat."""
         self._show_chat()
-        # Clear any existing messages if the interface was recreated
         if self.chat_interface:
             try:
                 self.chat_interface.clear_chat()
             except Exception:
-                pass  # Interface may have been recreated
-
-    def _create_content(self):
-        """Create the main content area."""
-        if USE_CUSTOMTKINTER:
-            self.content_frame = ctk.CTkFrame(self.root)
-            self.content_frame.pack(fill="both", expand=True)
-        else:
-            self.content_frame = ttk.Frame(self.root)
-            self.content_frame.pack(fill="both", expand=True)
-        
-        # Show chat by default
-        self._show_chat()
-
-    def _clear_content(self):
-        """Clear the content frame."""
-        for widget in self.content_frame.winfo_children():
-            widget.destroy()
-
-    def _show_chat(self):
-        """Show the chat view."""
-        self._clear_content()
-        self.current_view = "chat"
-        
-        if USE_CUSTOMTKINTER:
-            # Create main layout with sidebar and chat
-            main_container = ctk.CTkFrame(self.content_frame)
-            main_container.pack(fill="both", expand=True)
-            
-            # Sidebar
-            sidebar = ctk.CTkFrame(main_container, width=220, corner_radius=0, fg_color="#1a1a2e")
-            sidebar.pack(side="left", fill="y")
-            sidebar.pack_propagate(False)
-            
-            # Logo
-            logo = ctk.CTkLabel(
-                sidebar,
-                text="🧠 SysAgent",
-                font=ctk.CTkFont(size=20, weight="bold")
-            )
-            logo.pack(pady=(25, 5))
-            
-            # Current mode indicator
-            try:
-                from ..core.agent_modes import get_mode_manager
-                mm = get_mode_manager()
-                config = mm.get_config()
-                mode_label = ctk.CTkLabel(
-                    sidebar,
-                    text=f"{config.icon} {config.display_name}",
-                    font=ctk.CTkFont(size=11),
-                    text_color=config.color
-                )
-                mode_label.pack(pady=(0, 20))
-            except Exception:
                 pass
-            
-            # Navigation section
-            nav_label = ctk.CTkLabel(
-                sidebar,
-                text="NAVIGATION",
-                font=ctk.CTkFont(size=10),
-                text_color="#666"
-            )
-            nav_label.pack(anchor="w", padx=15, pady=(10, 5))
-            
-            # Navigation buttons
-            nav_buttons = [
-                ("💬 Chat", self._show_chat, self.current_view == "chat"),
-                ("🏠 Dashboard", self._show_dashboard, self.current_view == "dashboard"),
-                ("📊 Activity", self._show_activity, False),
-                ("📁 Sessions", self._show_sessions, False),
-            ]
-            
-            for text, command, is_active in nav_buttons:
-                btn = ctk.CTkButton(
-                    sidebar,
-                    text=text,
-                    command=command,
-                    width=190,
-                    height=35,
-                    anchor="w",
-                    fg_color="#3b82f6" if is_active else "transparent",
-                    hover_color="#2563eb" if is_active else "#2d2d4a"
-                )
-                btn.pack(pady=2, padx=10)
-            
-            # Tools section
-            tools_label = ctk.CTkLabel(
-                sidebar,
-                text="QUICK TOOLS",
-                font=ctk.CTkFont(size=10),
-                text_color="#666"
-            )
-            tools_label.pack(anchor="w", padx=15, pady=(20, 5))
-            
-            tools_buttons = [
-                ("💻 System Info", self._view_system_info),
-                ("📊 Processes", self._view_processes),
-                ("🌐 Network", self._view_network),
-                ("🖥️ Terminal", self._show_terminal),
-                ("⚙️ Settings", self._show_settings),
-            ]
-            
-            for text, command in tools_buttons:
-                btn = ctk.CTkButton(
-                    sidebar,
-                    text=text,
-                    command=command,
-                    width=190,
-                    height=32,
-                    anchor="w",
-                    fg_color="transparent",
-                    hover_color="#2d2d4a",
-                    font=ctk.CTkFont(size=12)
-                )
-                btn.pack(pady=1, padx=10)
-            
-            # Quick status at bottom
-            status_frame = ctk.CTkFrame(sidebar, fg_color="#16162a")
-            status_frame.pack(side="bottom", fill="x", padx=10, pady=10)
-            
-            if PSUTIL_AVAILABLE:
-                cpu = psutil.cpu_percent()
-                mem = psutil.virtual_memory().percent
-                
-                # CPU bar
-                cpu_frame = ctk.CTkFrame(status_frame, fg_color="transparent")
-                cpu_frame.pack(fill="x", padx=10, pady=5)
-                ctk.CTkLabel(cpu_frame, text="CPU", font=ctk.CTkFont(size=10), width=35).pack(side="left")
-                cpu_bar = ctk.CTkProgressBar(cpu_frame, width=100, height=8)
-                cpu_bar.set(cpu / 100)
-                cpu_bar.pack(side="left", padx=5)
-                ctk.CTkLabel(cpu_frame, text=f"{cpu:.0f}%", font=ctk.CTkFont(size=10), width=35).pack(side="left")
-                
-                # RAM bar
-                mem_frame = ctk.CTkFrame(status_frame, fg_color="transparent")
-                mem_frame.pack(fill="x", padx=10, pady=5)
-                ctk.CTkLabel(mem_frame, text="RAM", font=ctk.CTkFont(size=10), width=35).pack(side="left")
-                mem_bar = ctk.CTkProgressBar(mem_frame, width=100, height=8)
-                mem_bar.set(mem / 100)
-                mem_bar.pack(side="left", padx=5)
-                ctk.CTkLabel(mem_frame, text=f"{mem:.0f}%", font=ctk.CTkFont(size=10), width=35).pack(side="left")
-            
-            # Chat area
-            chat_container = ctk.CTkFrame(main_container)
-            chat_container.pack(side="right", fill="both", expand=True)
-            
-            # Quick actions bar at top
-            self._create_quick_actions_bar(chat_container)
-            
-            # Create chat interface
-            from .chat import ChatInterface
-            self.chat_interface = ChatInterface(chat_container, on_send=self._on_chat_message)
-        else:
-            # Simpler layout for standard tkinter
-            sidebar = ttk.Frame(self.content_frame, width=200)
-            sidebar.pack(side="left", fill="y")
-            
-            ttk.Label(sidebar, text="🧠 SysAgent", font=("", 14, "bold")).pack(pady=20)
-            
-            buttons = [
-                ("Chat", self._show_chat),
-                ("Dashboard", self._show_dashboard),
-                ("System Info", self._view_system_info),
-                ("Processes", self._view_processes),
-                ("Files", self._view_files),
-                ("Settings", self._show_settings),
-            ]
-            
-            for text, cmd in buttons:
-                ttk.Button(sidebar, text=text, command=cmd).pack(pady=3, padx=10, fill="x")
-            
-            # Chat area
-            chat_container = ttk.Frame(self.content_frame)
-            chat_container.pack(side="right", fill="both", expand=True)
-            
-            from .chat import ChatInterface
-            self.chat_interface = ChatInterface(chat_container, on_send=self._on_chat_message)
-
-    def _create_quick_actions_bar(self, parent):
-        """Create a quick actions bar for common commands."""
-        if USE_CUSTOMTKINTER:
-            bar = ctk.CTkFrame(parent, height=55, fg_color="#1e1e2e")
-            bar.pack(fill="x", padx=0, pady=0)
-            bar.pack_propagate(False)
-            
-            # Left side - Command palette button
-            left_frame = ctk.CTkFrame(bar, fg_color="transparent")
-            left_frame.pack(side="left", padx=15, pady=10)
-            
-            palette_btn = ctk.CTkButton(
-                left_frame,
-                text="⌘K Search",
-                command=self._toggle_command_palette,
-                width=120,
-                height=32,
-                fg_color="#3d3d4d",
-                hover_color="#4d4d5d",
-                font=ctk.CTkFont(size=12),
-                corner_radius=8
-            )
-            palette_btn.pack(side="left", padx=5)
-            
-            # Center - Mode-specific quick actions
-            center_frame = ctk.CTkFrame(bar, fg_color="transparent")
-            center_frame.pack(side="left", fill="x", expand=True, padx=10)
-            
-            # Get mode-specific actions
-            quick_actions = self._get_mode_quick_actions()
-            
-            for text, action in quick_actions[:5]:
-                btn = ctk.CTkButton(
-                    center_frame,
-                    text=text,
-                    command=lambda a=action: self._quick_action(a),
-                    height=30,
-                    fg_color="transparent",
-                    hover_color="#3d3d4d",
-                    border_width=1,
-                    border_color="#3d3d4d",
-                    font=ctk.CTkFont(size=11),
-                    corner_radius=6
-                )
-                btn.pack(side="left", padx=3)
-            
-            # Right side - Mode selector and workflow
-            right_frame = ctk.CTkFrame(bar, fg_color="transparent")
-            right_frame.pack(side="right", padx=15, pady=10)
-            
-            # Mode dropdown
-            mode_btn = ctk.CTkButton(
-                right_frame,
-                text=f"🎯 Mode",
-                command=self._show_mode_menu,
-                width=80,
-                height=30,
-                fg_color="#3d3d4d",
-                hover_color="#4d4d5d",
-                font=ctk.CTkFont(size=11),
-                corner_radius=6
-            )
-            mode_btn.pack(side="left", padx=3)
-            
-            workflow_btn = ctk.CTkButton(
-                right_frame,
-                text="▶ Workflows",
-                command=self._show_workflow_menu,
-                width=100,
-                height=30,
-                fg_color="#3b82f6",
-                hover_color="#2563eb",
-                font=ctk.CTkFont(size=11),
-                corner_radius=6
-            )
-            workflow_btn.pack(side="left", padx=3)
     
-    def _get_mode_quick_actions(self):
-        """Get quick actions based on current mode."""
-        try:
-            from ..core.agent_modes import get_mode_manager
-            mm = get_mode_manager()
-            config = mm.get_config()
-            return [(a['label'], a['command']) for a in config.quick_actions[:5]]
-        except Exception:
-            # Default actions
-            return [
-                ("🏥 Health", "Check system health"),
-                ("📊 Status", "Show system status"),
-                ("🔍 Search", "Search for files"),
-                ("⚡ Insights", "Quick insights"),
-            ]
+    def _close_popups(self):
+        """Close any open popups."""
+        if self.command_palette and self.command_palette.popup:
+            self.command_palette.close()
     
-    def _show_mode_menu(self):
-        """Show mode selection menu."""
-        menu = tk.Menu(self.root, tearoff=0)
-        
-        modes = [
-            ("🧠 General", "general"),
-            ("👨‍💻 Developer", "developer"),
-            ("🔧 SysAdmin", "sysadmin"),
-            ("🔒 Security", "security"),
-            ("⚡ Productivity", "productivity"),
-            ("🤖 Automation", "automation"),
-        ]
-        
-        for label, mode in modes:
-            check = "✓ " if mode == self.current_mode else "   "
-            menu.add_command(label=f"{check}{label}", command=lambda m=mode: self._set_mode(m))
-        
-        try:
-            menu.tk_popup(self.root.winfo_pointerx(), self.root.winfo_pointery())
-        finally:
-            menu.grab_release()
-
-    def _quick_action(self, action: str):
-        """Execute a quick action."""
-        if self.chat_interface:
-            if action.endswith(" "):
-                # User needs to complete the command
-                self.chat_interface._set_input_text(action)
-                try:
-                    # Focus the input field
-                    if hasattr(self.chat_interface, 'input_field'):
-                        self.chat_interface.input_field.focus_set()
-                except Exception:
-                    pass
-            else:
-                # Send directly
-                self.chat_interface._send_message_direct(action)
-
-    def _show_workflow_menu(self):
-        """Show workflow menu."""
-        if USE_CUSTOMTKINTER:
-            menu = tk.Menu(self.root, tearoff=0)
-            
-            menu.add_command(label="▶ Morning Routine", command=lambda: self._run_workflow("morning_routine"))
-            menu.add_command(label="▶ Dev Setup", command=lambda: self._run_workflow("dev_setup"))
-            menu.add_command(label="▶ System Maintenance", command=lambda: self._run_workflow("system_maintenance"))
-            menu.add_command(label="▶ End of Day", command=lambda: self._run_workflow("end_of_day"))
-            menu.add_separator()
-            menu.add_command(label="📋 List Workflows", command=lambda: self._quick_action("List all my workflows"))
-            menu.add_command(label="➕ Create Workflow", command=lambda: self._quick_action("Create a new workflow named "))
-            
-            try:
-                menu.tk_popup(self.root.winfo_pointerx(), self.root.winfo_pointery())
-            finally:
-                menu.grab_release()
-
-    def _run_workflow(self, workflow_name: str):
-        """Run a predefined workflow."""
-        self._quick_action(f"Run the {workflow_name.replace('_', ' ')} workflow")
-
     def _on_chat_message(self, message: str):
-        """Handle chat message from user with streaming support."""
+        """Handle chat message."""
         if self.agent:
-            # Process in background thread to not block UI
-            import threading
             thread = threading.Thread(target=self._process_chat_message, args=(message,))
             thread.daemon = True
             thread.start()
         else:
-            self.chat_interface.add_message("Agent not initialized. Please configure your API key.", is_user=False)
-
+            if self.chat_interface:
+                self.chat_interface.add_message("Agent not initialized. Please configure your API key.", is_user=False, message_type="error")
+    
     def _process_chat_message(self, message: str):
-        """Process chat message in background thread with execution logging."""
-        import time
+        """Process chat message in background with deep agent reasoning."""
         start_time = time.time()
         
         try:
-            # Try streaming first
-            use_streaming = hasattr(self.agent, 'process_command_streaming')
+            # Record to learning
+            if self.learning:
+                self.learning.record_command(message, success=True)
             
-            if use_streaming:
-                # Create streaming message container
-                stream_data = None
-                try:
-                    self.root.after(0, lambda: setattr(self, '_stream_data', self.chat_interface.add_streaming_message()))
-                    time.sleep(0.05)  # Brief wait for UI update
-                    stream_data = getattr(self, '_stream_data', None)
-                except Exception:
-                    pass
-                
-                full_response = ""
-                tools_used = []
-                
-                for chunk in self.agent.process_command_streaming(message):
-                    chunk_type = chunk.get("type", "")
-                    content = chunk.get("content", "")
-                    
-                    if chunk_type == "content" and content:
-                        full_response = content  # Full content replacement
-                        if stream_data:
-                            stream_data["content"] = content
-                            self.root.after(0, lambda c=content: self._update_stream(stream_data, c))
-                    elif chunk_type == "token" and content:
-                        full_response += content
-                        if stream_data:
-                            self.root.after(0, lambda t=content: self.chat_interface.update_streaming_message(stream_data, t))
-                    elif chunk_type == "tool_call":
-                        name = chunk.get("name", "tool")
-                        tools_used.append(name)
-                        # Add execution log for tool call
-                        self.root.after(0, lambda n=name: self._add_tool_log(n, "running"))
-                    elif chunk_type == "tool_result":
-                        if tools_used:
-                            tool = tools_used[-1]
-                            duration = int((time.time() - start_time) * 1000)
-                            self.root.after(0, lambda t=tool, d=duration: self._add_tool_log(t, "success", d))
-                    elif chunk_type == "error":
-                        full_response = f"Error: {content}"
-                        if tools_used:
-                            self.root.after(0, lambda t=tools_used[-1]: self._add_tool_log(t, "error"))
-                        break
-                    elif chunk_type == "done":
-                        break
-                
-                # Finalize streaming message
-                if stream_data:
-                    self.root.after(0, lambda: self.chat_interface.finish_streaming_message(stream_data))
-                elif full_response:
-                    self.root.after(0, lambda r=full_response: self.chat_interface.add_message(r, is_user=False))
+            # Use deep agent if available for complex tasks
+            if self.deep_agent:
+                self._process_with_deep_agent(message, start_time)
+            elif hasattr(self.agent, 'process_command_streaming'):
+                self._process_with_streaming(message, start_time)
             else:
-                # Non-streaming fallback with execution logging
-                # Show "thinking" log
-                self.root.after(0, lambda: self._add_tool_log("SysAgent", "running", details="Processing..."))
-                
-                result = self.agent.process_command(message)
-                
-                duration = int((time.time() - start_time) * 1000)
-                
-                if result.get('success'):
-                    response = result.get('message', 'Command executed successfully.')
-                    # Show success log
-                    self.root.after(0, lambda d=duration: self._add_tool_log("SysAgent", "success", d))
-                else:
-                    response = result.get('message', 'Unknown error')
-                    self.root.after(0, lambda: self._add_tool_log("SysAgent", "error"))
-                
-                self.root.after(0, lambda r=response: self.chat_interface.add_message(r, is_user=False))
-                
+                self._process_simple(message)
+        
         except Exception as e:
             error_msg = str(e)
-            # Simplify context length error
             if "context_length" in error_msg:
                 error_msg = "Conversation too long. Please start a new chat."
-            self.root.after(0, lambda: self._add_tool_log("Error", "error"))
-            self.root.after(0, lambda m=error_msg: self.chat_interface.add_message(f"Error: {m}", is_user=False))
-
-    def _add_tool_log(self, tool_name: str, status: str, duration_ms: int = 0, details: str = ""):
-        """Add a tool execution log to the chat."""
-        if hasattr(self.chat_interface, 'add_execution_log'):
-            self.chat_interface.add_execution_log(tool_name, "", status, duration_ms, details)
-
+            self.root.after(0, lambda: self.chat_interface.add_message(f"Error: {error_msg}", is_user=False, message_type="error"))
+    
+    def _process_with_deep_agent(self, message: str, start_time: float):
+        """Process with deep agent showing reasoning."""
+        try:
+            for update in self.deep_agent.process_with_reasoning(message):
+                update_type = update.get('type', '')
+                
+                if update_type == 'reasoning':
+                    step = update.get('step', '')
+                    self.root.after(0, lambda s=step: self.chat_interface.add_reasoning_step('analysis', s))
+                
+                elif update_type == 'analysis':
+                    complexity = update.get('complexity', 0)
+                    needs_planning = update.get('needs_planning', False)
+                    if needs_planning:
+                        self.root.after(0, lambda: self.chat_interface.add_reasoning_step(
+                            'planning', f'Complex task detected (score: {complexity}), creating plan...'
+                        ))
+                
+                elif update_type == 'plan':
+                    steps = update.get('steps', [])
+                    self.root.after(0, lambda s=steps: self.chat_interface.add_reasoning_step(
+                        'planning', f'Plan created with {len(s)} steps'
+                    ))
+                
+                elif update_type == 'progress':
+                    step = update.get('step', 0)
+                    total = update.get('total', 1)
+                    desc = update.get('description', '')
+                    self.root.after(0, lambda s=step, t=total, d=desc: 
+                        self.chat_interface.update_reasoning_progress(s, t, d)
+                    )
+                
+                elif update_type == 'step_result':
+                    success = update.get('success', False)
+                    result = update.get('result', '')
+                    if not success:
+                        error = update.get('error', '')
+                        self.root.after(0, lambda e=error: self.chat_interface.add_reasoning_step(
+                            'error_recovery', f'Step failed: {e[:50]}...'
+                        ))
+                
+                elif update_type == 'final':
+                    response = update.get('response', 'Done')
+                    quality = update.get('quality_score', 0)
+                    duration = update.get('duration_ms', 0)
+                    
+                    # Hide reasoning panel and show response
+                    self.root.after(0, lambda: self.chat_interface._hide_reasoning())
+                    self.root.after(50, lambda r=response: self.chat_interface.add_message(r, is_user=False))
+                    
+                    # Show quality indicator if enabled
+                    if quality > 0:
+                        self.root.after(100, lambda q=quality, d=duration: 
+                            self.chat_interface._toast(f"Quality: {q:.0f}% | {d}ms")
+                        )
+        except Exception as e:
+            # Fallback to simple processing
+            self._process_simple(message)
+    
+    def _process_with_streaming(self, message: str, start_time: float):
+        """Process with streaming."""
+        stream_data = None
+        try:
+            self.root.after(0, lambda: setattr(self, '_stream_data', self.chat_interface.add_streaming_message()))
+            time.sleep(0.05)
+            stream_data = getattr(self, '_stream_data', None)
+        except Exception:
+            pass
+        
+        full_response = ""
+        
+        for chunk in self.agent.process_command_streaming(message):
+            chunk_type = chunk.get("type", "")
+            content = chunk.get("content", "")
+            
+            if chunk_type == "content" and content:
+                full_response = content
+                if stream_data:
+                    stream_data["content"] = content
+                    self.root.after(0, lambda c=content: self._update_stream(stream_data, c))
+            elif chunk_type == "token" and content:
+                full_response += content
+                if stream_data:
+                    self.root.after(0, lambda t=content: self.chat_interface.update_streaming_message(stream_data, t))
+            elif chunk_type == "tool_call":
+                name = chunk.get("name", "tool")
+                self.root.after(0, lambda n=name: self.chat_interface.add_execution_log(n, "", "running"))
+            elif chunk_type == "tool_result":
+                duration = int((time.time() - start_time) * 1000)
+                self.root.after(0, lambda d=duration: self.chat_interface.add_execution_log("", "", "success", d))
+            elif chunk_type == "error":
+                full_response = f"Error: {content}"
+                break
+            elif chunk_type == "done":
+                break
+        
+        if stream_data:
+            self.root.after(0, lambda: self.chat_interface.finish_streaming_message(stream_data))
+        elif full_response:
+            self.root.after(0, lambda r=full_response: self.chat_interface.add_message(r, is_user=False))
+    
+    def _process_simple(self, message: str):
+        """Process with simple agent call."""
+        result = self.agent.process_command(message)
+        response = result.get('message', 'Done') if result.get('success') else result.get('message', 'Error')
+        msg_type = "text" if result.get('success') else "error"
+        self.root.after(0, lambda: self.chat_interface.add_message(response, is_user=False, message_type=msg_type))
+    
     def _update_stream(self, stream_data: dict, content: str):
-        """Update stream content."""
+        """Update streaming message."""
         if stream_data and "label" in stream_data:
             try:
                 stream_data["label"].configure(text=content + "▌")
                 stream_data["content"] = content
             except Exception:
                 pass
-
-    def _show_tool_status(self, tool_name: str):
-        """Show tool execution status."""
-        try:
-            if hasattr(self.chat_interface, 'status_text'):
-                self.chat_interface.status_text.configure(text=f"Using {tool_name}...")
-        except Exception:
-            pass
-
-    def _format_data(self, data: dict, max_items: int = 10) -> str:
-        """Format data dictionary for display."""
-        lines = []
-        count = 0
-        for key, value in data.items():
-            if count >= max_items:
-                lines.append("...")
-                break
-            if isinstance(value, (str, int, float, bool)):
-                lines.append(f"• {key}: {value}")
-                count += 1
-            elif isinstance(value, list) and len(value) <= 5:
-                lines.append(f"• {key}: {value}")
-                count += 1
-        return "\n".join(lines)
-
-    def _show_terminal(self):
-        """Show terminal/command output view."""
-        self._clear_content()
-        self.current_view = "terminal"
-        
-        if USE_CUSTOMTKINTER:
-            # Create terminal view
-            terminal_frame = ctk.CTkFrame(self.content_frame)
-            terminal_frame.pack(fill="both", expand=True, padx=10, pady=10)
-            
-            # Title
-            title = ctk.CTkLabel(
-                terminal_frame,
-                text="🖥️ Terminal Output",
-                font=ctk.CTkFont(size=20, weight="bold")
-            )
-            title.pack(pady=10)
-            
-            # Output area
-            self.terminal_output = ctk.CTkTextbox(
-                terminal_frame,
-                font=ctk.CTkFont(family="Courier", size=12),
-                wrap="word"
-            )
-            self.terminal_output.pack(fill="both", expand=True, padx=10, pady=5)
-            
-            # Input area
-            input_frame = ctk.CTkFrame(terminal_frame)
-            input_frame.pack(fill="x", padx=10, pady=10)
-            
-            ctk.CTkLabel(input_frame, text="$").pack(side="left", padx=5)
-            
-            self.terminal_input = ctk.CTkEntry(input_frame, placeholder_text="Enter command...")
-            self.terminal_input.pack(side="left", fill="x", expand=True, padx=5)
-            self.terminal_input.bind("<Return>", self._run_terminal_command)
-            
-            run_btn = ctk.CTkButton(
-                input_frame,
-                text="Run",
-                width=80,
-                command=self._run_terminal_command
-            )
-            run_btn.pack(side="right", padx=5)
-            
-            # Add welcome message
-            self.terminal_output.insert("end", "SysAgent Terminal\n")
-            self.terminal_output.insert("end", "=" * 50 + "\n")
-            self.terminal_output.insert("end", "Enter shell commands below. Use with caution!\n\n")
-        else:
-            ttk.Label(self.content_frame, text="Terminal View", font=("", 16)).pack(pady=20)
-            self.terminal_output = tk.Text(self.content_frame, font=("Courier", 10))
-            self.terminal_output.pack(fill="both", expand=True, padx=10, pady=5)
-            
-            input_frame = ttk.Frame(self.content_frame)
-            input_frame.pack(fill="x", padx=10, pady=10)
-            
-            self.terminal_input = ttk.Entry(input_frame)
-            self.terminal_input.pack(side="left", fill="x", expand=True)
-            self.terminal_input.bind("<Return>", self._run_terminal_command)
-            
-            ttk.Button(input_frame, text="Run", command=self._run_terminal_command).pack(side="right")
-
+    
     def _run_terminal_command(self, event=None):
-        """Run a terminal command."""
+        """Run terminal command."""
         import subprocess
         
-        if USE_CUSTOMTKINTER:
-            command = self.terminal_input.get()
-            self.terminal_input.delete(0, "end")
-        else:
-            command = self.terminal_input.get()
-            self.terminal_input.delete(0, "end")
+        if not hasattr(self, 'terminal_input'):
+            return
+        
+        command = self.terminal_input.get()
+        self.terminal_input.delete(0, "end")
         
         if not command.strip():
             return
@@ -999,829 +1578,40 @@ class MainWindow:
         self.terminal_output.insert("end", f"$ {command}\n")
         
         try:
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
+            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
             if result.stdout:
                 self.terminal_output.insert("end", result.stdout)
             if result.stderr:
                 self.terminal_output.insert("end", f"[stderr] {result.stderr}")
-            
             self.terminal_output.insert("end", "\n")
         except subprocess.TimeoutExpired:
-            self.terminal_output.insert("end", "[Timeout: Command took too long]\n\n")
+            self.terminal_output.insert("end", "[Timeout]\n\n")
         except Exception as e:
-            self.terminal_output.insert("end", f"[Error: {str(e)}]\n\n")
+            self.terminal_output.insert("end", f"[Error: {e}]\n\n")
         
-        # Scroll to bottom
         self.terminal_output.see("end")
-
-    def _show_plugins(self):
-        """Show plugin manager."""
-        if USE_CUSTOMTKINTER:
-            plugin_window = ctk.CTkToplevel(self.root)
-        else:
-            plugin_window = tk.Toplevel(self.root)
-        
-        plugin_window.title("Plugin Manager")
-        plugin_window.geometry("600x400")
-        
-        try:
-            from ..core.plugins import PluginManager
-            pm = PluginManager()
-            discovered = pm.discover_plugins()
-            loaded = pm.list_plugins()
-            
-            if USE_CUSTOMTKINTER:
-                title = ctk.CTkLabel(
-                    plugin_window,
-                    text="Plugin Manager",
-                    font=ctk.CTkFont(size=18, weight="bold")
-                )
-                title.pack(pady=10)
-                
-                # Discovered plugins
-                ctk.CTkLabel(plugin_window, text="Discovered Plugins:").pack(anchor="w", padx=10)
-                
-                for plugin in discovered:
-                    frame = ctk.CTkFrame(plugin_window)
-                    frame.pack(fill="x", padx=10, pady=2)
-                    
-                    ctk.CTkLabel(frame, text=plugin.get('name', 'Unknown')).pack(side="left", padx=5)
-                    status = "Loaded" if plugin.get('loaded') else "Not Loaded"
-                    ctk.CTkLabel(frame, text=status, text_color="green" if plugin.get('loaded') else "gray").pack(side="right", padx=5)
-                
-                if not discovered:
-                    ctk.CTkLabel(plugin_window, text="No plugins found. Create one with 'sysagent plugins create <name>'").pack(pady=10)
-            else:
-                ttk.Label(plugin_window, text="Plugin Manager", font=("", 14, "bold")).pack(pady=10)
-                
-                for plugin in discovered:
-                    text = f"{plugin.get('name', 'Unknown')} - {'Loaded' if plugin.get('loaded') else 'Not Loaded'}"
-                    ttk.Label(plugin_window, text=text).pack(anchor="w", padx=10)
-                
-                if not discovered:
-                    ttk.Label(plugin_window, text="No plugins found").pack(pady=10)
-        except Exception as e:
-            if USE_CUSTOMTKINTER:
-                ctk.CTkLabel(plugin_window, text=f"Error: {e}").pack(pady=20)
-            else:
-                ttk.Label(plugin_window, text=f"Error: {e}").pack(pady=20)
-
-    def _show_shortcuts(self):
-        """Show keyboard shortcuts."""
-        shortcuts = """
-Keyboard Shortcuts:
-
-Ctrl+N    - New Chat
-Ctrl+D    - Show Dashboard  
-Ctrl+S    - Open Settings
-Ctrl+T    - Open Terminal
-Ctrl+Q    - Quit
-
-In Chat:
-Enter     - Send message
-Shift+Enter - New line
-
-In Terminal:
-Enter     - Run command
-"""
-        messagebox.showinfo("Keyboard Shortcuts", shortcuts)
-
-    def _show_dashboard(self):
-        """Show the dashboard view."""
-        self._clear_content()
-        self.current_view = "dashboard"
-        
-        from .dashboard import DashboardWindow
-        
-        # Embed dashboard in the content frame
-        if USE_CUSTOMTKINTER:
-            # Create sidebar
-            sidebar = ctk.CTkFrame(self.content_frame, width=200, corner_radius=0)
-            sidebar.pack(side="left", fill="y")
-            sidebar.pack_propagate(False)
-            
-            # Logo
-            logo = ctk.CTkLabel(
-                sidebar,
-                text="🧠 SysAgent",
-                font=ctk.CTkFont(size=20, weight="bold")
-            )
-            logo.pack(pady=30)
-            
-            # Navigation buttons
-            nav_buttons = [
-                ("🏠 Dashboard", self._show_dashboard),
-                ("💻 System Info", self._view_system_info),
-                ("📊 Processes", self._view_processes),
-                ("📁 Files", self._view_files),
-                ("🌐 Network", self._view_network),
-                ("⚙️ Settings", self._show_settings),
-            ]
-            
-            for text, command in nav_buttons:
-                btn = ctk.CTkButton(
-                    sidebar,
-                    text=text,
-                    command=command,
-                    width=180,
-                    height=35,
-                    anchor="w"
-                )
-                btn.pack(pady=3, padx=10)
-            
-            # Main content
-            main_content = ctk.CTkFrame(self.content_frame)
-            main_content.pack(side="right", fill="both", expand=True)
-            
-            # Dashboard content
-            self._create_dashboard_content(main_content)
-        else:
-            ttk.Label(
-                self.content_frame,
-                text="Dashboard View",
-                font=("Helvetica", 18, "bold")
-            ).pack(pady=20)
-
-    def _create_dashboard_content(self, parent):
-        """Create dashboard content."""
-        try:
-            import psutil
-            PSUTIL_AVAILABLE = True
-        except ImportError:
-            PSUTIL_AVAILABLE = False
-        
-        if USE_CUSTOMTKINTER:
-            # Title
-            title = ctk.CTkLabel(
-                parent,
-                text="System Dashboard",
-                font=ctk.CTkFont(size=24, weight="bold")
-            )
-            title.pack(pady=20, padx=20, anchor="w")
-            
-            # Stats grid
-            stats_frame = ctk.CTkFrame(parent)
-            stats_frame.pack(fill="x", padx=20, pady=10)
-            
-            if PSUTIL_AVAILABLE:
-                cpu_percent = psutil.cpu_percent(interval=0.1)
-                memory = psutil.virtual_memory()
-                disk = psutil.disk_usage('/')
-                
-                stats = [
-                    ("CPU Usage", f"{cpu_percent}%", self._get_color(cpu_percent)),
-                    ("Memory", f"{memory.percent}%", self._get_color(memory.percent)),
-                    ("Disk", f"{disk.percent}%", self._get_color(disk.percent)),
-                    ("Processes", str(len(psutil.pids())), "blue"),
-                ]
-                
-                for i, (label, value, color) in enumerate(stats):
-                    box = ctk.CTkFrame(stats_frame)
-                    box.grid(row=0, column=i, padx=10, pady=10, sticky="nsew")
-                    stats_frame.grid_columnconfigure(i, weight=1)
-                    
-                    ctk.CTkLabel(box, text=label, font=ctk.CTkFont(size=12)).pack(pady=(15, 5))
-                    ctk.CTkLabel(
-                        box,
-                        text=value,
-                        font=ctk.CTkFont(size=28, weight="bold"),
-                        text_color=color
-                    ).pack(pady=(5, 15))
-            
-            # System info
-            info_frame = ctk.CTkFrame(parent)
-            info_frame.pack(fill="x", padx=20, pady=10)
-            
-            ctk.CTkLabel(
-                info_frame,
-                text="System Information",
-                font=ctk.CTkFont(size=16, weight="bold")
-            ).pack(anchor="w", padx=15, pady=(15, 10))
-            
-            import platform
-            from datetime import datetime
-            
-            info_text = f"""
-Platform: {platform.system()} {platform.release()}
-Machine: {platform.machine()}
-Processor: {platform.processor() or 'N/A'}
-Python: {platform.python_version()}
-"""
-            if PSUTIL_AVAILABLE:
-                boot_time = datetime.fromtimestamp(psutil.boot_time())
-                uptime = datetime.now() - boot_time
-                info_text += f"Uptime: {str(uptime).split('.')[0]}"
-            
-            ctk.CTkLabel(
-                info_frame,
-                text=info_text,
-                font=ctk.CTkFont(size=13),
-                justify="left"
-            ).pack(anchor="w", padx=15, pady=(0, 15))
-            
-            # Quick actions
-            actions_frame = ctk.CTkFrame(parent)
-            actions_frame.pack(fill="x", padx=20, pady=10)
-            
-            ctk.CTkLabel(
-                actions_frame,
-                text="Quick Actions",
-                font=ctk.CTkFont(size=16, weight="bold")
-            ).pack(anchor="w", padx=15, pady=(15, 10))
-            
-            btn_frame = ctk.CTkFrame(actions_frame, fg_color="transparent")
-            btn_frame.pack(fill="x", padx=15, pady=(0, 15))
-            
-            actions = [
-                ("🔄 Refresh", self._show_dashboard),
-                ("🧹 Clean Temp", self._clean_temp),
-                ("📊 Processes", self._view_processes),
-                ("🌐 Check Net", self._check_internet),
-                ("⚙️ Settings", self._show_settings),
-            ]
-            
-            for text, command in actions:
-                btn = ctk.CTkButton(btn_frame, text=text, command=command, width=100)
-                btn.pack(side="left", padx=5)
-
-    def _get_color(self, percent: float) -> str:
-        """Get color based on percentage."""
-        if percent < 50:
-            return "green"
-        elif percent < 80:
-            return "orange"
-        return "red"
-
-    def _show_settings(self):
-        """Show settings view."""
-        self._clear_content()
-        self.current_view = "settings"
-        
-        from .settings import SettingsWindow
-        
-        # Create embedded settings
-        if USE_CUSTOMTKINTER:
-            settings_instance = SettingsWindow()
-            settings_instance._initialize_managers()
-            
-            # Create widgets in content frame
-            title = ctk.CTkLabel(
-                self.content_frame,
-                text="🔑 Settings",
-                font=ctk.CTkFont(size=24, weight="bold")
-            )
-            title.pack(pady=20)
-            
-            # Create notebook for tabs
-            notebook = ctk.CTkTabview(self.content_frame)
-            notebook.pack(fill="both", expand=True, padx=20, pady=10)
-            
-            api_tab = notebook.add("API Keys")
-            provider_tab = notebook.add("Model Providers")
-            permissions_tab = notebook.add("Permissions")
-            
-            # Simplified API key section
-            self._create_simple_api_section(api_tab, settings_instance)
-            self._create_simple_provider_section(provider_tab, settings_instance)
-            self._create_simple_permissions_section(permissions_tab, settings_instance)
-            
-            # Back button
-            back_btn = ctk.CTkButton(
-                self.content_frame,
-                text="← Back to Dashboard",
-                command=self._show_dashboard,
-                width=150
-            )
-            back_btn.pack(pady=10)
-        else:
-            ttk.Label(
-                self.content_frame,
-                text="Settings",
-                font=("Helvetica", 18, "bold")
-            ).pack(pady=20)
-
-    def _create_simple_api_section(self, parent, settings_instance):
-        """Create simplified API key section."""
-        if USE_CUSTOMTKINTER:
-            # OpenAI
-            frame = ctk.CTkFrame(parent)
-            frame.pack(fill="x", pady=10, padx=10)
-            
-            ctk.CTkLabel(frame, text="OpenAI API Key", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
-            
-            import os
-            openai_key = os.environ.get("OPENAI_API_KEY", "")
-            
-            entry = ctk.CTkEntry(frame, placeholder_text="sk-...", show="*", width=400)
-            entry.pack(fill="x", padx=10, pady=(0, 10))
-            if openai_key:
-                entry.insert(0, openai_key)
-            
-            settings_instance.openai_api_key_entry = entry
-            
-            # Save button
-            save_btn = ctk.CTkButton(
-                parent,
-                text="Save API Keys",
-                command=settings_instance._save_api_keys,
-                width=200
-            )
-            save_btn.pack(pady=20)
-
-    def _create_simple_provider_section(self, parent, settings_instance):
-        """Create simplified provider section."""
-        if USE_CUSTOMTKINTER:
-            frame = ctk.CTkFrame(parent)
-            frame.pack(fill="x", pady=10, padx=10)
-            
-            ctk.CTkLabel(frame, text="Model Provider", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
-            
-            settings_instance.provider_var = tk.StringVar(value="openai")
-            
-            providers = [("OpenAI", "openai"), ("Ollama", "ollama"), ("Anthropic", "anthropic")]
-            
-            for text, value in providers:
-                rb = ctk.CTkRadioButton(frame, text=text, variable=settings_instance.provider_var, value=value)
-                rb.pack(anchor="w", padx=20, pady=2)
-            
-            ctk.CTkLabel(frame, text="Model Name", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=(20, 5))
-            
-            settings_instance.model_entry = ctk.CTkEntry(frame, placeholder_text="gpt-4", width=300)
-            settings_instance.model_entry.pack(fill="x", padx=10, pady=(0, 10))
-            settings_instance.model_entry.insert(0, "gpt-4")
-            
-            save_btn = ctk.CTkButton(
-                parent,
-                text="Save Provider Settings",
-                command=settings_instance._save_provider_settings,
-                width=200
-            )
-            save_btn.pack(pady=20)
-
-    def _create_simple_permissions_section(self, parent, settings_instance):
-        """Create simplified permissions section."""
-        if USE_CUSTOMTKINTER:
-            frame = ctk.CTkFrame(parent)
-            frame.pack(fill="both", expand=True, pady=10, padx=10)
-            
-            ctk.CTkLabel(frame, text="Permissions", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
-            
-            permissions = [
-                ("file_access", "File Access"),
-                ("system_info", "System Info"),
-                ("process_management", "Process Management"),
-                ("network_access", "Network Access"),
-                ("system_control", "System Control"),
-                ("code_execution", "Code Execution"),
-            ]
-            
-            settings_instance.permission_vars = {}
-            
-            for perm_key, perm_name in permissions:
-                var = tk.BooleanVar(value=settings_instance._get_permission_status(perm_key))
-                settings_instance.permission_vars[perm_key] = var
-                
-                cb = ctk.CTkCheckBox(frame, text=perm_name, variable=var)
-                cb.pack(anchor="w", padx=20, pady=2)
-            
-            btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
-            btn_frame.pack(fill="x", padx=10, pady=10)
-            
-            ctk.CTkButton(
-                btn_frame,
-                text="Grant All",
-                command=settings_instance._grant_all_permissions,
-                width=100
-            ).pack(side="left", padx=5)
-            
-            ctk.CTkButton(
-                btn_frame,
-                text="Revoke All",
-                command=settings_instance._revoke_all_permissions,
-                fg_color="red",
-                width=100
-            ).pack(side="left", padx=5)
-            
-            ctk.CTkButton(
-                parent,
-                text="Save Permissions",
-                command=settings_instance._save_permissions,
-                width=200
-            ).pack(pady=20)
-
-    def _view_system_info(self):
-        """View system information."""
-        self._clear_content()
-        
-        if USE_CUSTOMTKINTER:
-            title = ctk.CTkLabel(
-                self.content_frame,
-                text="System Information",
-                font=ctk.CTkFont(size=24, weight="bold")
-            )
-            title.pack(pady=20)
-            
-            try:
-                from ..core.config import ConfigManager
-                from ..core.permissions import PermissionManager
-                from ..tools.base import ToolExecutor
-                from ..tools import SystemInfoTool
-                
-                config_manager = ConfigManager()
-                permission_manager = PermissionManager(config_manager)
-                executor = ToolExecutor(permission_manager)
-                executor.register_tool(SystemInfoTool())
-                
-                result = executor.execute_tool("system_info_tool", action="overview")
-                
-                scroll = ctk.CTkScrollableFrame(self.content_frame)
-                scroll.pack(fill="both", expand=True, padx=20, pady=10)
-                
-                if result.success:
-                    self._display_data(scroll, result.data)
-                else:
-                    ctk.CTkLabel(scroll, text=result.message).pack()
-                    
-            except Exception as e:
-                ctk.CTkLabel(self.content_frame, text=f"Error: {e}").pack()
-            
-            ctk.CTkButton(
-                self.content_frame,
-                text="← Back",
-                command=self._show_dashboard,
-                width=100
-            ).pack(pady=10)
-
-    def _display_data(self, parent, data, level=0):
-        """Display dictionary data recursively."""
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if isinstance(value, dict):
-                    if USE_CUSTOMTKINTER:
-                        frame = ctk.CTkFrame(parent)
-                        frame.pack(fill="x", pady=5, padx=level*20)
-                        ctk.CTkLabel(
-                            frame,
-                            text=str(key).replace("_", " ").title(),
-                            font=ctk.CTkFont(weight="bold")
-                        ).pack(anchor="w", padx=10, pady=5)
-                        self._display_data(frame, value, level + 1)
-                else:
-                    text = f"{str(key).replace('_', ' ').title()}: {value}"
-                    if USE_CUSTOMTKINTER:
-                        ctk.CTkLabel(parent, text=text).pack(anchor="w", padx=10 + level*20, pady=2)
-
-    def _view_processes(self):
-        """View processes."""
-        self._show_process_list()
-
-    def _show_process_list(self):
-        """Show process list in a new window."""
-        if not PSUTIL_AVAILABLE:
-            messagebox.showerror("Error", "psutil is required for process management")
-            return
-        
-        # Create a new window
-        if USE_CUSTOMTKINTER:
-            proc_window = ctk.CTkToplevel(self.root)
-        else:
-            proc_window = tk.Toplevel(self.root)
-        
-        proc_window.title("Process Manager")
-        proc_window.geometry("800x600")
-        
-        # Create treeview for processes
-        columns = ("PID", "Name", "CPU %", "Memory %", "Status")
-        
-        if USE_CUSTOMTKINTER:
-            # Frame for treeview
-            tree_frame = ctk.CTkFrame(proc_window)
-            tree_frame.pack(fill="both", expand=True, padx=10, pady=10)
-            
-            # Use ttk.Treeview inside customtkinter
-            tree = ttk.Treeview(tree_frame, columns=columns, show="headings")
-        else:
-            tree_frame = ttk.Frame(proc_window)
-            tree_frame.pack(fill="both", expand=True, padx=10, pady=10)
-            tree = ttk.Treeview(tree_frame, columns=columns, show="headings")
-        
-        # Configure columns
-        for col in columns:
-            tree.heading(col, text=col)
-            tree.column(col, width=100 if col != "Name" else 200)
-        
-        # Scrollbar
-        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-        tree.pack(fill="both", expand=True)
-        
-        # Populate processes
-        try:
-            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'status']):
-                try:
-                    info = proc.info
-                    tree.insert("", "end", values=(
-                        info['pid'],
-                        info['name'][:30] if info['name'] else "N/A",
-                        f"{info['cpu_percent']:.1f}" if info['cpu_percent'] else "0.0",
-                        f"{info['memory_percent']:.1f}" if info['memory_percent'] else "0.0",
-                        info['status'] if info['status'] else "N/A"
-                    ))
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to list processes: {e}")
-        
-        # Buttons frame
-        if USE_CUSTOMTKINTER:
-            btn_frame = ctk.CTkFrame(proc_window)
-            btn_frame.pack(fill="x", padx=10, pady=10)
-            
-            refresh_btn = ctk.CTkButton(btn_frame, text="Refresh", command=lambda: self._refresh_processes(tree))
-            refresh_btn.pack(side="left", padx=5)
-            
-            kill_btn = ctk.CTkButton(btn_frame, text="Kill Process", command=lambda: self._kill_selected_process(tree), fg_color="red")
-            kill_btn.pack(side="left", padx=5)
-        else:
-            btn_frame = ttk.Frame(proc_window)
-            btn_frame.pack(fill="x", padx=10, pady=10)
-            
-            ttk.Button(btn_frame, text="Refresh", command=lambda: self._refresh_processes(tree)).pack(side="left", padx=5)
-            ttk.Button(btn_frame, text="Kill Process", command=lambda: self._kill_selected_process(tree)).pack(side="left", padx=5)
-
-    def _refresh_processes(self, tree):
-        """Refresh process list."""
-        # Clear existing items
-        for item in tree.get_children():
-            tree.delete(item)
-        
-        # Repopulate
-        try:
-            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'status']):
-                try:
-                    info = proc.info
-                    tree.insert("", "end", values=(
-                        info['pid'],
-                        info['name'][:30] if info['name'] else "N/A",
-                        f"{info['cpu_percent']:.1f}" if info['cpu_percent'] else "0.0",
-                        f"{info['memory_percent']:.1f}" if info['memory_percent'] else "0.0",
-                        info['status'] if info['status'] else "N/A"
-                    ))
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to refresh: {e}")
-
-    def _kill_selected_process(self, tree):
-        """Kill the selected process."""
-        selected = tree.selection()
-        if not selected:
-            messagebox.showwarning("Warning", "Please select a process to kill")
-            return
-        
-        item = tree.item(selected[0])
-        pid = int(item['values'][0])
-        name = item['values'][1]
-        
-        if messagebox.askyesno("Confirm", f"Kill process {name} (PID: {pid})?"):
-            try:
-                proc = psutil.Process(pid)
-                proc.terminate()
-                messagebox.showinfo("Success", f"Process {name} terminated")
-                self._refresh_processes(tree)
-            except psutil.NoSuchProcess:
-                messagebox.showinfo("Info", "Process no longer exists")
-                self._refresh_processes(tree)
-            except psutil.AccessDenied:
-                messagebox.showerror("Error", "Access denied. Try running with elevated privileges.")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to kill process: {e}")
-
-    def _view_files(self):
-        """View files."""
-        self._show_file_browser()
-
-    def _show_file_browser(self):
-        """Show a simple file browser."""
-        from pathlib import Path
-        
-        if USE_CUSTOMTKINTER:
-            file_window = ctk.CTkToplevel(self.root)
-        else:
-            file_window = tk.Toplevel(self.root)
-        
-        file_window.title("File Browser")
-        file_window.geometry("600x500")
-        
-        current_path = Path.home()
-        
-        # Path entry
-        if USE_CUSTOMTKINTER:
-            path_frame = ctk.CTkFrame(file_window)
-            path_frame.pack(fill="x", padx=10, pady=10)
-            path_entry = ctk.CTkEntry(path_frame, width=400)
-            path_entry.pack(side="left", padx=5)
-            path_entry.insert(0, str(current_path))
-        else:
-            path_frame = ttk.Frame(file_window)
-            path_frame.pack(fill="x", padx=10, pady=10)
-            path_entry = ttk.Entry(path_frame, width=50)
-            path_entry.pack(side="left", padx=5)
-            path_entry.insert(0, str(current_path))
-        
-        # File list
-        file_list = tk.Listbox(file_window, font=("Courier", 10))
-        file_list.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        def refresh_files():
-            path = Path(path_entry.get())
-            file_list.delete(0, tk.END)
-            
-            if path.exists() and path.is_dir():
-                file_list.insert(tk.END, "..")
-                try:
-                    for item in sorted(path.iterdir()):
-                        prefix = "[D] " if item.is_dir() else "[F] "
-                        file_list.insert(tk.END, prefix + item.name)
-                except PermissionError:
-                    file_list.insert(tk.END, "(Permission Denied)")
-        
-        def on_double_click(event):
-            selection = file_list.curselection()
-            if selection:
-                item = file_list.get(selection[0])
-                if item == "..":
-                    new_path = Path(path_entry.get()).parent
-                elif item.startswith("[D] "):
-                    new_path = Path(path_entry.get()) / item[4:]
-                else:
-                    return
-                path_entry.delete(0, tk.END)
-                path_entry.insert(0, str(new_path))
-                refresh_files()
-        
-        file_list.bind("<Double-Button-1>", on_double_click)
-        refresh_files()
-
-    def _view_network(self):
-        """View network."""
-        self._show_network_info()
-
-    def _show_network_info(self):
-        """Show network information."""
-        if USE_CUSTOMTKINTER:
-            net_window = ctk.CTkToplevel(self.root)
-        else:
-            net_window = tk.Toplevel(self.root)
-        
-        net_window.title("Network Information")
-        net_window.geometry("600x400")
-        
-        # Text area for network info
-        if USE_CUSTOMTKINTER:
-            text_frame = ctk.CTkFrame(net_window)
-            text_frame.pack(fill="both", expand=True, padx=10, pady=10)
-            text = tk.Text(text_frame, font=("Courier", 10), wrap="word")
-        else:
-            text_frame = ttk.Frame(net_window)
-            text_frame.pack(fill="both", expand=True, padx=10, pady=10)
-            text = tk.Text(text_frame, font=("Courier", 10), wrap="word")
-        
-        text.pack(fill="both", expand=True)
-        
-        # Get network info
-        import socket
-        info = []
-        
-        try:
-            hostname = socket.gethostname()
-            info.append(f"Hostname: {hostname}")
-            info.append(f"Local IP: {socket.gethostbyname(hostname)}")
-        except:
-            info.append("Could not get hostname/IP")
-        
-        if PSUTIL_AVAILABLE:
-            info.append("\nNetwork Interfaces:")
-            for iface, addrs in psutil.net_if_addrs().items():
-                info.append(f"\n  {iface}:")
-                for addr in addrs:
-                    if addr.family == socket.AF_INET:
-                        info.append(f"    IPv4: {addr.address}")
-                    elif addr.family == socket.AF_INET6:
-                        info.append(f"    IPv6: {addr.address}")
-            
-            info.append("\nNetwork I/O:")
-            net_io = psutil.net_io_counters()
-            info.append(f"  Bytes Sent: {net_io.bytes_sent / (1024*1024):.2f} MB")
-            info.append(f"  Bytes Received: {net_io.bytes_recv / (1024*1024):.2f} MB")
-        
-        text.insert("1.0", "\n".join(info))
-        text.config(state="disabled")
-
-    def _clean_temp(self):
-        """Clean temp files."""
-        try:
-            from ..core.config import ConfigManager
-            from ..core.permissions import PermissionManager
-            from ..tools.base import ToolExecutor
-            from ..tools import FileTool
-            
-            config_manager = ConfigManager()
-            permission_manager = PermissionManager(config_manager)
-            executor = ToolExecutor(permission_manager)
-            executor.register_tool(FileTool())
-            
-            result = executor.execute_tool("file_tool", action="cleanup")
-            messagebox.showinfo("Cleanup", result.message)
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-
-    def _organize_downloads(self):
-        """Organize downloads."""
-        from pathlib import Path
-        try:
-            from ..core.config import ConfigManager
-            from ..core.permissions import PermissionManager
-            from ..tools.base import ToolExecutor
-            from ..tools import FileTool
-            
-            config_manager = ConfigManager()
-            permission_manager = PermissionManager(config_manager)
-            executor = ToolExecutor(permission_manager)
-            executor.register_tool(FileTool())
-            
-            result = executor.execute_tool("file_tool", action="organize", source_dir=str(Path.home() / "Downloads"))
-            messagebox.showinfo("Organize", result.message)
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-
-    def _check_internet(self):
-        """Check internet connection."""
-        try:
-            from ..core.config import ConfigManager
-            from ..core.permissions import PermissionManager
-            from ..tools.base import ToolExecutor
-            from ..tools import NetworkTool
-            
-            config_manager = ConfigManager()
-            permission_manager = PermissionManager(config_manager)
-            executor = ToolExecutor(permission_manager)
-            executor.register_tool(NetworkTool())
-            
-            result = executor.execute_tool("network_tool", action="ping", host="google.com")
-            if result.success:
-                messagebox.showinfo("Internet", "Internet connection is working!")
-            else:
-                messagebox.showerror("Internet", "No internet connection")
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-
-    def _run_cli_command(self):
-        """Run a CLI command."""
-        if USE_CUSTOMTKINTER:
-            command = ctk.CTkInputDialog(
-                text="Enter command:",
-                title="Run CLI Command"
-            ).get_input()
-            
-            if command:
-                messagebox.showinfo("CLI", f"Command: {command}\nUse CLI for full functionality.")
-        else:
-            messagebox.showinfo("CLI", "Use the command line for CLI commands")
-
-    def _show_docs(self):
-        """Show documentation."""
-        import webbrowser
-        webbrowser.open("https://github.com/sysagent/sysagent-cli")
-
-    def _show_about(self):
-        """Show about dialog."""
-        messagebox.showinfo(
-            "About SysAgent",
-            "SysAgent v0.1.0\n\n"
-            "Secure, intelligent command-line assistant\n"
-            "for OS automation and control.\n\n"
-            "https://github.com/sysagent/sysagent-cli"
-        )
-
+    
     def _on_exit(self):
         """Handle exit."""
         if messagebox.askyesno("Exit", "Are you sure you want to exit?"):
+            if self.monitor:
+                try:
+                    self.monitor.stop()
+                except Exception:
+                    pass
             self.root.destroy()
-
+    
     def run(self):
-        """Run the main window."""
+        """Run the application."""
+        self.root.protocol("WM_DELETE_WINDOW", self._on_exit)
         self.root.mainloop()
 
 
-if __name__ == "__main__":
+def launch_gui():
+    """Launch the main GUI."""
     app = MainWindow()
     app.run()
+
+
+if __name__ == "__main__":
+    launch_gui()

@@ -131,6 +131,40 @@
 - Performance optimization tips
 - Security issue detection
 
+### 🧠 Deep Agent (NEW!)
+
+**Multi-step Task Planning:**
+- Automatic task decomposition for complex requests
+- Intelligent step sequencing
+- Progress tracking with visual updates
+- Parallel execution where possible
+
+**Self-Reflection:**
+- Response quality evaluation (relevance, completeness, accuracy)
+- Automatic response improvement when quality is low
+- Quality score display
+
+**Error Recovery:**
+- Intelligent retry with alternative approaches
+- Graceful failure handling
+- Automatic fallback strategies
+
+**Tool Chaining:**
+- Automatic tool sequence selection
+- Context-aware tool recommendations
+- Pre-built chains for common tasks
+
+**Feedback Learning:**
+- Thumbs up/down feedback on responses
+- Pattern learning from successful interactions
+- Approach memory for similar future tasks
+
+**Reasoning Transparency:**
+- Visual reasoning panel in UI
+- Step-by-step plan display
+- Progress indicators for multi-step tasks
+- Duration and quality metrics
+
 ### 🏢 Enterprise Features (NEW!)
 
 **Session Management:**

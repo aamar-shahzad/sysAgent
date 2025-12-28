@@ -22,6 +22,7 @@ from .agent_modes import AgentMode, AgentModeManager, ModeConfig, get_mode_manag
 from .activity_tracker import ActivityTracker, Activity, ActivityType, get_activity_tracker
 from .smart_learning import SmartLearningSystem, get_learning_system
 from .proactive_monitor import ProactiveMonitor, Alert, AlertLevel, get_monitor, start_monitoring
+from .deep_agent import DeepAgent, TaskPlan, ReasoningStep, create_deep_agent
 
 __all__ = [
     "SysAgent",
@@ -63,4 +64,9 @@ __all__ = [
     "AlertLevel",
     "get_monitor",
     "start_monitoring",
+    # Deep Agent
+    "DeepAgent",
+    "TaskPlan",
+    "ReasoningStep",
+    "create_deep_agent",
 ] 
