@@ -56,15 +56,24 @@
 ### Installation
 
 ```bash
-# Install from PyPI
-pip install sysagent-cli
+# Clone the repository
+git clone https://github.com/sysagent/sysagent-cli.git
+cd sysagent-cli
+
+# Install from local directory
+pip install -e .
 
 # Or install with all optional features
-pip install sysagent-cli[full]
+pip install -e ".[full]"
+
+# Install with GUI support
+pip install -e ".[gui]"
 
 # For development
-pip install sysagent-cli[dev]
+pip install -e ".[dev]"
 ```
+
+> **Note**: This package is not yet published to PyPI. Install from source as shown above.
 
 ### First Run
 
