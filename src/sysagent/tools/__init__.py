@@ -36,6 +36,9 @@ from .workflow_tool import WorkflowTool
 from .smart_search_tool import SmartSearchTool
 from .system_insights_tool import SystemInsightsTool
 from .context_memory_tool import ContextMemoryTool
+from .ocr_tool import OCRTool
+from .screen_recorder_tool import ScreenRecorderTool
+from .macro_tool import MacroTool
 
 __all__ = [
     "BaseTool",
@@ -76,4 +79,7 @@ __all__ = [
     "SmartSearchTool",
     "SystemInsightsTool",
     "ContextMemoryTool",
+    "OCRTool",
+    "ScreenRecorderTool",
+    "MacroTool",
 ] 

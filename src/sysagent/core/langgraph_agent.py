@@ -898,6 +898,56 @@ class LangGraphAgent:
             except Exception as e:
                 return f"Error: {str(e)}"
 
+        # OCR - Extract text from images/screen
+        @tool
+        def ocr_extract(action: str = "from_screen", path: str = None,
+                       x: int = None, y: int = None, width: int = None, height: int = None) -> str:
+            """Extract text from images or screen using OCR. Actions: from_image (path), from_screen, from_region (x,y,width,height), from_clipboard."""
+            try:
+                tool_params = {"action": action}
+                if path: tool_params["path"] = path
+                if x is not None: tool_params["x"] = x
+                if y is not None: tool_params["y"] = y
+                if width: tool_params["width"] = width
+                if height: tool_params["height"] = height
+                
+                result = self.tool_executor.execute_tool("ocr_tool", **tool_params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # Screen recording
+        @tool
+        def screen_recorder(action: str, path: str = None, fps: int = 30, audio: bool = True) -> str:
+            """Record screen to video. Actions: start, stop, status, list."""
+            try:
+                tool_params = {"action": action}
+                if path: tool_params["path"] = path
+                if fps: tool_params["fps"] = fps
+                tool_params["audio"] = audio
+                
+                result = self.tool_executor.execute_tool("screen_recorder_tool", **tool_params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
+        # Macro recording and playback
+        @tool
+        def macro_control(action: str, name: str = None, description: str = None,
+                         speed: float = 1.0, template: str = None) -> str:
+            """Record and playback macros. Actions: start_recording, stop_recording, play, list, get, delete, templates, create_from_template."""
+            try:
+                tool_params = {"action": action}
+                if name: tool_params["name"] = name
+                if description: tool_params["description"] = description
+                if speed != 1.0: tool_params["speed"] = speed
+                if template: tool_params["template"] = template
+                
+                result = self.tool_executor.execute_tool("macro_tool", **tool_params)
+                return str(result.data) if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
+
         tools.extend([
             file_operations, system_info, process_management, network_diagnostics, 
             system_control, generate_code, security_operations, automation_operations, 
@@ -906,9 +956,11 @@ class LangGraphAgent:
             browser_control, window_control, media_control, send_notification,
             git_operations, http_request, package_manager,
             workflow_operations, smart_search, system_insights, context_memory,
-            # New comprehensive OS control tools
+            # Complete OS control tools
             keyboard_mouse, take_screenshot, schedule_task, service_control,
-            send_email, voice_control, credentials_manager
+            send_email, voice_control, credentials_manager,
+            # Advanced media tools
+            ocr_extract, screen_recorder, macro_control
         ])
         return tools
 
@@ -923,7 +975,8 @@ class LangGraphAgent:
             GitTool, APITool, PackageManagerTool,
             WorkflowTool, SmartSearchTool, SystemInsightsTool, ContextMemoryTool,
             KeyboardMouseTool, ScreenshotTool, SchedulerTool, ServiceTool,
-            EmailTool, VoiceTool, AuthTool
+            EmailTool, VoiceTool, AuthTool,
+            OCRTool, ScreenRecorderTool, MacroTool
         )
         
         # Register all tools for complete OS control
@@ -970,6 +1023,10 @@ class LangGraphAgent:
             ContextMemoryTool(),
             # Security
             AuthTool(),
+            # Advanced media & automation
+            OCRTool(),
+            ScreenRecorderTool(),
+            MacroTool(),
         ]
         
         for tool in tools_to_register:

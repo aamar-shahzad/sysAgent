@@ -29,6 +29,8 @@ from .middleware import (
     BreakpointType, Breakpoint, StateSnapshot, FeedbackEntry,
     get_middleware, reset_middleware
 )
+from .context_awareness import ContextAwareness, ContextInfo, Suggestion, get_context_awareness
+from .task_templates import TaskTemplateManager, TaskTemplate, TaskStep, get_template_manager
 
 __all__ = [
     "SysAgent",
@@ -92,4 +94,14 @@ __all__ = [
     "FeedbackEntry",
     "get_middleware",
     "reset_middleware",
+    # Context Awareness
+    "ContextAwareness",
+    "ContextInfo",
+    "Suggestion",
+    "get_context_awareness",
+    # Task Templates
+    "TaskTemplateManager",
+    "TaskTemplate",
+    "TaskStep",
+    "get_template_manager",
 ] 

@@ -19,6 +19,15 @@ __all__ = [
     "show_onboarding",
     "SystemTray",
     "run_tray_mode",
+    # New components
+    "FloatingWidget",
+    "QuickLauncher",
+    "ClipboardHistoryPanel",
+    "NotificationCenter",
+    "NotificationPanel",
+    "ActivityTimeline",
+    "TimelinePanel",
+    "launch_floating_widget",
 ]
 
 
@@ -137,3 +146,63 @@ def run_tray_mode():
     """Run SysAgent in tray mode."""
     from .system_tray import run_tray_mode as rtm
     rtm()
+
+
+def FloatingWidget(on_command=None, on_expand=None):
+    """Get FloatingWidget class."""
+    if not _check_gui_available():
+        raise ImportError("tkinter is not available.")
+    from .floating_widget import FloatingWidget as FW
+    return FW(on_command=on_command, on_expand=on_expand)
+
+
+def QuickLauncher(on_command=None):
+    """Get QuickLauncher class."""
+    if not _check_gui_available():
+        raise ImportError("tkinter is not available.")
+    from .floating_widget import QuickLauncher as QL
+    return QL(on_command=on_command)
+
+
+def ClipboardHistoryPanel(parent, colors, on_paste=None):
+    """Get ClipboardHistoryPanel class."""
+    if not _check_gui_available():
+        raise ImportError("tkinter is not available.")
+    from .floating_widget import ClipboardHistoryPanel as CHP
+    return CHP(parent, colors, on_paste)
+
+
+def NotificationCenter():
+    """Get NotificationCenter instance."""
+    from .notification_center import get_notification_center
+    return get_notification_center()
+
+
+def NotificationPanel(parent, colors, notification_center, on_action=None):
+    """Get NotificationPanel class."""
+    if not _check_gui_available():
+        raise ImportError("tkinter is not available.")
+    from .notification_center import NotificationPanel as NP
+    return NP(parent, colors, notification_center, on_action)
+
+
+def ActivityTimeline():
+    """Get ActivityTimeline instance."""
+    from .activity_timeline import get_activity_timeline
+    return get_activity_timeline()
+
+
+def TimelinePanel(parent, colors, timeline, on_entry_click=None):
+    """Get TimelinePanel class."""
+    if not _check_gui_available():
+        raise ImportError("tkinter is not available.")
+    from .activity_timeline import TimelinePanel as TP
+    return TP(parent, colors, timeline, on_entry_click)
+
+
+def launch_floating_widget(on_command=None, on_expand=None):
+    """Launch the floating widget."""
+    if not _check_gui_available():
+        raise ImportError("tkinter is not available.")
+    from .floating_widget import launch_floating_widget as lfw
+    lfw(on_command=on_command, on_expand=on_expand)
